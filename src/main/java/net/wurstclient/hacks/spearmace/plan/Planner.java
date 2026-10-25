@@ -32,6 +32,9 @@ public final class Planner
 	private final Evaluator evaluator;
 	private final long budgetMillis;
 	
+	private long totalNanos;
+	private int replans;
+	
 	public Planner(TargetModel targetModel, Options options,
 		Controller controller, Search search, Evaluator evaluator,
 		long budgetMillis)
@@ -49,9 +52,20 @@ public final class Planner
 		TickSim model = new TickSim(level, targetModel);
 		SearchProblem problem =
 			new ModelProblem(now, model, options, controller, evaluator);
+		long start = System.nanoTime();
 		Plan plan = search.search(problem, Budget.millis(budgetMillis));
-		LOGGER.info("[{}] plan {}", now.self().tick(), plan);
+		long nanos = System.nanoTime() - start;
+		totalNanos += nanos;
+		replans++;
+		LOGGER.info("[{}] plan {} in {} ms", now.self().tick(), plan,
+			nanos / 1_000_000);
 		return plan;
+	}
+	
+	/** How long a replan took on average so far. */
+	public double meanMillis()
+	{
+		return replans == 0 ? 0 : totalNanos / 1e6 / replans;
 	}
 	
 	/** Fills what the plan's actions leave unclaimed. */

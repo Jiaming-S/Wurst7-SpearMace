@@ -54,6 +54,13 @@ public record Outcome(Action action, GameState start, GameState end,
 		return failure != null;
 	}
 	
+	/** How many steps had {@code event}. */
+	public int count(Event event)
+	{
+		return (int)steps.stream().filter(t -> t.events().contains(event))
+			.count();
+	}
+	
 	public int ticks()
 	{
 		return steps.size();

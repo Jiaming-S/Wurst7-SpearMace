@@ -197,9 +197,10 @@ public final class TickSim
 			sim.jump = jump;
 			sim.step();
 			
-			// Entity.checkFallDamage()
+			// Entity.checkFallDamage(), but the server doesn't count the fall
+			// between a smash and the arrival of its launch (measured)
 			double dy = sim.pos.y - pos.y;
-			if(dy < 0)
+			if(dy < 0 && !launchPending())
 				fall -= (float)dy;
 			if(sim.onGround)
 			{
@@ -228,6 +229,16 @@ public final class TickSim
 				target = targetModel.step(level, target);
 			
 			arrive();
+		}
+		
+		/** Whether a smash launch is on its way to the player. */
+		private boolean launchPending()
+		{
+			for(Pending p : pending)
+				if(p instanceof Impulse i && !i.applied()
+					&& !Double.isNaN(i.setY()))
+					return true;
+			return false;
 		}
 		
 		/** What the server sent earlier shows up now. */

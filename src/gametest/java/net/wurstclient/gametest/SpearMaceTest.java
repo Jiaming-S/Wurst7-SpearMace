@@ -72,7 +72,10 @@ import net.wurstclient.hacks.spearmace.plan.Options;
 import net.wurstclient.hacks.spearmace.plan.Planner;
 import net.wurstclient.hacks.spearmace.plan.Runner;
 import net.wurstclient.hacks.spearmace.plan.Runner.Entry;
+import net.wurstclient.hacks.spearmace.plan.Search;
 import net.wurstclient.hacks.spearmace.plan.eval.DamageRace;
+import net.wurstclient.hacks.spearmace.plan.search.BeamSearch;
+import net.wurstclient.hacks.spearmace.plan.search.Mcts;
 import net.wurstclient.hacks.spearmace.plan.search.RuleSearch;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.TargetSim;
@@ -677,6 +680,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		testStunSlam(context, server, failures);
 		testCombatChain(context, server, failures);
 		testPlannerChain(context, server, failures);
+		testSearchComparison(context, server, failures);
 	}
 	
 	private void testStrikeFromAbove(ClientGameTestContext context,
@@ -911,8 +915,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 		context.waitFor(mc -> clientEntity(golem) != null);
 		context.waitTicks(2);
 		
-		List<Entry> history = runPlanner(context, name, 300, h -> h.stream()
-			.filter(e -> e.payload(Struck.class) != null).count() >= 2);
+		List<Entry> history = runPlanner(context, name, 300,
+			newPlanner(new RuleSearch(), 5), h -> h.stream()
+				.filter(e -> e.payload(Struck.class) != null).count() >= 2);
 		
 		List<Struck> strikes = history.stream()
 			.map(e -> e.payload(Struck.class)).filter(s -> s != null).toList();
@@ -934,19 +939,66 @@ public final class SpearMaceTest implements FabricClientGameTest
 	}
 	
 	/**
-	 * Lets the planner fight the watched target until {@code done} accepts
-	 * the history or {@code maxTicks} pass, logging every tick.
+	 * Fights the planner-chain scenario for a fixed time with each search,
+	 * and compares how much damage they deal.
+	 */
+	private void testSearchComparison(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		List<String> names = List.of("rule", "beam", "mcts");
+		List<Search> searches =
+			List.of(new RuleSearch(), new BeamSearch(4, 3), new Mcts(60, 1, 1));
+		ArrayList<String> summary = new ArrayList<>();
+		double ruleDamage = Double.NaN;
+		for(int i = 0; i < searches.size(); i++)
+		{
+			String name = "Search " + names.get(i);
+			reset(context, server);
+			int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+			runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+				+ (TARGET_Z - 1.5) + " 0 0");
+			context.waitFor(mc -> clientEntity(golem) != null);
+			context.waitTicks(2);
+			
+			Planner planner = newPlanner(searches.get(i), 50);
+			List<Entry> history =
+				runPlanner(context, name, 250, planner, h -> false);
+			long strikes =
+				history.stream().filter(e -> e.payload(Struck.class) != null
+					|| e.payload(Slammed.class) != null).count();
+			double damage = initialHealth - targetHealth;
+			summary
+				.add(String.format("%s: damage=%.1f strikes=%d replan=%.1fms",
+					names.get(i), damage, strikes, planner.meanMillis()));
+			
+			if(i == 0)
+				ruleDamage = damage;
+			if(damage <= 0)
+				failures.add(name + ": dealt no damage: " + history);
+			else if(damage < ruleDamage / 2)
+				failures.add(name + ": dealt " + fmt(damage)
+					+ ", less than half of the rules' " + fmt(ruleDamage));
+		}
+		LOGGER.info("SM: search comparison {}", summary);
+	}
+	
+	private static Planner newPlanner(Search search, long budgetMillis)
+	{
+		return new Planner(TargetModel.ballistic(), new Options(),
+			new DefaultController(), search, new DamageRace(), budgetMillis);
+	}
+	
+	/**
+	 * Lets {@code planner} fight the watched target until {@code done}
+	 * accepts the history or {@code maxTicks} pass, logging every tick.
 	 */
 	private List<Entry> runPlanner(ClientGameTestContext context, String name,
-		int maxTicks, Predicate<List<Entry>> done)
+		int maxTicks, Planner planner, Predicate<List<Entry>> done)
 	{
 		Recorder recorder =
 			new Recorder(() -> targetId >= 0 ? clientEntity(targetId) : null);
 		Runner[] planRunner = new Runner[1];
 		context.runOnClient(mc -> {
-			Planner planner = new Planner(TargetModel.ballistic(),
-				new Options(), new DefaultController(), new RuleSearch(),
-				new DamageRace(), 5);
 			planRunner[0] = new Runner(
 				() -> targetId >= 0 ? clientEntity(targetId) : null, planner);
 			planRunner[0].start();

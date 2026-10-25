@@ -7,25 +7,54 @@
  */
 package net.wurstclient.hacks.spearmace.plan.eval;
 
+import net.wurstclient.hacks.spearmace.model.Event;
 import net.wurstclient.hacks.spearmace.plan.Evaluator;
 import net.wurstclient.hacks.spearmace.plan.Outcome;
 import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
- * Expected damage dealt minus damage taken. No leaf value yet, so it only
- * compares what plans do, not where they leave us.
+ * Expected damage dealt, minus what it cost: fall damage, items and time.
+ * A state is worth the height the next smash can use, a wind charge to
+ * launch again with, and being close enough to strike.
  */
 public final class DamageRace implements Evaluator
 {
+	/** Horizontal distance that a strike from above still covers. */
+	private static final double STRIKE_RANGE = 3;
+	
+	private final Weights w;
+	
+	public DamageRace(Weights weights)
+	{
+		w = weights;
+	}
+	
+	public DamageRace()
+	{
+		this(Weights.DEFAULT);
+	}
+	
 	@Override
 	public double score(Outcome o)
 	{
-		return o.chance() * o.damageDealt() - o.damageTaken();
+		return o.chance() * o.damageDealt() - w.fallDamage() * o.damageTaken()
+			- w.windCharge() * o.count(Event.THREW_WIND_CHARGE)
+			- w.pearl() * o.count(Event.THREW_PEARL) - w.tick() * o.ticks();
 	}
 	
 	@Override
 	public double value(GameState s)
 	{
-		return 0;
+		if(!s.targetAlive())
+			return 0;
+		
+		SelfState self = s.self();
+		double height = self.pos().y - s.target().eyePos().y;
+		double value = w.height() * Math.clamp(height, 0, w.maxHeight());
+		if(self.kit().windCharge() >= 0)
+			value += w.ready();
+		double gap = self.pos().subtract(s.target().pos()).horizontalDistance();
+		return value - w.distance() * Math.max(0, gap - STRIKE_RANGE);
 	}
 }
