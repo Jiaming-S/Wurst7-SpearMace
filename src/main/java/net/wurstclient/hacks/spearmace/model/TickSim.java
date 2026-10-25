@@ -22,6 +22,7 @@ import net.wurstclient.hacks.spearmace.combat.Engagement;
 import net.wurstclient.hacks.spearmace.combat.Loadout;
 import net.wurstclient.hacks.spearmace.maneuver.Hotbar;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
+import net.wurstclient.hacks.spearmace.sim.Move;
 import net.wurstclient.hacks.spearmace.sim.PearlSim;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.Shots;
@@ -146,7 +147,7 @@ public final class TickSim
 		private double fall;
 		private float yaw;
 		private float pitch;
-		private boolean forward;
+		private Move move;
 		private boolean sprinting;
 		private boolean jump;
 		private int ticker;
@@ -169,7 +170,7 @@ public final class TickSim
 			fall = before.fallDistance();
 			yaw = before.yaw();
 			pitch = before.pitch();
-			forward = before.forward();
+			move = before.move();
 			sprinting = before.sprinting();
 			jump = before.jump();
 			ticker = before.attackStrengthTicker();
@@ -186,16 +187,17 @@ public final class TickSim
 				yaw = input.rotation().yaw();
 				pitch = input.rotation().pitch();
 			}
-			forward = input.forward();
+			move = input.move();
 			sprinting = input.sprint();
 			jump = input.jump();
 			
 			PlayerSim sim = new PlayerSim(level, pos, vel, onGround);
 			sim.yaw = yaw;
-			sim.forward = forward;
+			sim.move = move;
 			sim.sprinting = sprinting;
 			sim.jump = jump;
 			sim.step();
+			sprinting = sim.sprinting;
 			
 			// Entity.checkFallDamage(), but the server doesn't count the fall
 			// between a smash and the arrival of its launch (measured)
@@ -548,7 +550,7 @@ public final class TickSim
 		private Transition result()
 		{
 			SelfState self = new SelfState(tick, pos, vel, onGround, fall, yaw,
-				pitch, forward, sprinting, jump, before.fallFlying(), ticker,
+				pitch, move, sprinting, jump, before.fallFlying(), ticker,
 				heldChanged, missTime, before.interactionRange(),
 				before.knockbackResistance(), kit, pending);
 			return new Transition(new GameState(self, target), events,

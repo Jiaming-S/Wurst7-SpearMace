@@ -69,7 +69,7 @@ public enum Observer
 		double fall = Math.min(c.fallDistance(), p.fallDistance());
 		
 		SelfState self = new SelfState(c.tick(), c.pos(), c.vel(), c.onGround(),
-			fall, c.yaw(), c.pitch(), c.forward(), c.sprinting(), c.jump(),
+			fall, c.yaw(), c.pitch(), c.move(), c.sprinting(), c.jump(),
 			c.fallFlying(), c.attackStrengthTicker(), c.heldChanged(),
 			c.missTime(), c.interactionRange(), c.knockbackResistance(),
 			c.kit().withCooldownsFrom(p.kit()), pending);

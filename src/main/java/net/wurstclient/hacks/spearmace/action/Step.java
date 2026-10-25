@@ -11,6 +11,7 @@ import java.util.EnumSet;
 import java.util.Set;
 
 import net.wurstclient.hacks.spearmace.model.TickInput;
+import net.wurstclient.hacks.spearmace.sim.Move;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 import net.wurstclient.util.Rotation;
 
@@ -56,8 +57,9 @@ public sealed interface Step
 		/** Holds (or releases) the forward and sprint keys. */
 		public Run moving(boolean forward)
 		{
-			TickInput moved = new TickInput(input.rotation(), forward, forward,
-				input.jump(), input.slot(), input.attack(), input.use());
+			TickInput moved = new TickInput(input.rotation(),
+				forward ? Move.FORWARD : Move.NONE, forward, input.jump(),
+				input.slot(), input.attack(), input.use());
 			return new Run(moved, claims, committed, then)
 				.holding(Channel.MOVE);
 		}
@@ -88,7 +90,7 @@ public sealed interface Step
 			boolean move = claims.contains(Channel.MOVE);
 			boolean jump = claims.contains(Channel.JUMP);
 			return new TickInput(input.rotation(),
-				move ? input.forward() : self.forward(),
+				move ? input.move() : self.move(),
 				move ? input.sprint() : self.sprinting(),
 				jump ? input.jump() : self.jump(), input.slot(), input.attack(),
 				input.use());

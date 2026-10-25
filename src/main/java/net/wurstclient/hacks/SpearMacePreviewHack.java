@@ -143,7 +143,7 @@ public final class SpearMacePreviewHack extends Hack
 		lastObserved = observed;
 		
 		SelfState self = observed.self();
-		TickInput hold = new TickInput(null, self.forward(), self.sprinting(),
+		TickInput hold = new TickInput(null, self.move(), self.sprinting(),
 			self.jump(), -1, false, false);
 		start = observed;
 		rollout = sim.rollout(observed,

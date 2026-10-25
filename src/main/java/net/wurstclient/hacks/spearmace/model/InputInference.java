@@ -48,7 +48,7 @@ public enum InputInference
 		// the later view
 		SelfState view = attack ? after : before;
 		return new TickInput(new Rotation(view.yaw(), view.pitch()),
-			before.forward(), before.sprinting(), before.jump(), slot, attack,
+			before.move(), before.sprinting(), before.jump(), slot, attack,
 			use);
 	}
 }

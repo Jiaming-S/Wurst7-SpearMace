@@ -99,7 +99,8 @@ import net.wurstclient.util.Rotation;
  *
  * Set it to {@code movement} or {@code combat} to run only that group.
  * The far-away target scenarios are harder and only run when it is set to
- * {@code hard} (or {@code all} for everything).
+ * {@code hard}, and the pearl catches with movement keys held only when it
+ * is set to {@code keys} ({@code all} runs everything).
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
@@ -139,11 +140,19 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private final ArrayList<NamedReport> replays = new ArrayList<>();
 	private TestServerContext server;
 	
+	/**
+	 * Server ticks between the pearl and the wind charge spawning, as seen
+	 * by {@link #logServerProjectiles}, or -1.
+	 */
+	private volatile int serverGap = -1;
+	
 	/** The combat target whose server-side health gets logged, or -1. */
 	private int targetId = -1;
 	private double initialHealth;
 	private double targetHealth;
 	private ShieldDummy shieldDummy;
+	
+	private static final List<String> OPT_IN_GROUPS = List.of("hard", "keys");
 	
 	public static boolean isEnabled()
 	{
@@ -151,16 +160,17 @@ public final class SpearMaceTest implements FabricClientGameTest
 	}
 	
 	/**
-	 * The {@code hard} group only runs when asked for by name or with
-	 * {@code all}, the other groups also run for any other value.
+	 * The {@code hard} and {@code keys} groups only run when asked for by
+	 * name or with {@code all}, the other groups also run for any other
+	 * value.
 	 */
 	private static boolean runs(String group)
 	{
 		String value = System.getenv("WURST_SPEARMACE_TEST");
-		if(group.equals("hard"))
-			return "hard".equals(value) || "all".equals(value);
-		return !List.of("movement", "combat", "hard").contains(value)
-			|| group.equals(value);
+		if(OPT_IN_GROUPS.contains(group))
+			return group.equals(value) || "all".equals(value);
+		return !List.of("movement", "combat").contains(value)
+			&& !OPT_IN_GROUPS.contains(value) || group.equals(value);
 	}
 	
 	@Override
@@ -227,6 +237,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 				runHardTests(context, server, failures);
 				setCamera(context, CameraType.FIRST_PERSON);
 			}
+			
+			if(runs("keys"))
+				testCatchesHoldingKeys(context, server, failures);
 		}
 		
 		for(NamedReport r : replays)
@@ -686,6 +699,119 @@ public final class SpearMaceTest implements FabricClientGameTest
 			failures.add(name + ": delay " + tooFar + " wasn't refused: " + r);
 		if(pearlsAfter != pearlsBefore)
 			failures.add(name + ": threw a pearl anyway");
+	}
+	
+	/**
+	 * Diagonal pearl catches with movement keys held, so the pearl and the
+	 * wind charge leave from different places: walking on the ground, and
+	 * drifting after a wind charge launch. "R" is sprint.
+	 */
+	private void testCatchesHoldingKeys(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		int trials = 3;
+		int successes = 0;
+		int attempts = 0;
+		
+		// catching toward the walking direction, and 60 degrees off it
+		List<String> groundKeys = List.of("W", "WR", "S", "A", "D", "WA", "SD");
+		for(String keys : groundKeys)
+			for(int i = 0; i < trials; i++)
+			{
+				attempts++;
+				if(catchHoldingKeys(context, server, keys, DIAGONAL, false,
+					i + 1))
+					successes++;
+			}
+		for(int i = 0; i < trials; i++)
+		{
+			attempts++;
+			if(catchHoldingKeys(context, server, "WR", new Rotation(60, -30),
+				false, i + 1))
+				successes++;
+		}
+		
+		List<String> apexKeys = List.of("W", "S", "A", "D", "WA");
+		for(String keys : apexKeys)
+			for(int i = 0; i < trials; i++)
+			{
+				attempts++;
+				if(catchHoldingKeys(context, server, keys, DIAGONAL, true,
+					i + 1))
+					successes++;
+			}
+		
+		LOGGER.info("SM: Catches holding keys {}/{} accurate", successes,
+			attempts);
+		if(successes < attempts * 3 / 4)
+			failures.add("Catches holding keys: only " + successes + "/"
+				+ attempts + " accurate catches");
+	}
+	
+	/**
+	 * @param fromApex
+	 *            launch with a wind charge first, press the keys once in
+	 *            the air and catch at the apex; otherwise walk for a bit
+	 *            and catch from the ground
+	 * @return whether the catch landed where it was planned
+	 */
+	private boolean catchHoldingKeys(ClientGameTestContext context,
+		TestServerContext server, String keys, Rotation aim, boolean fromApex,
+		int trial)
+	{
+		String name = String.format("Keys %s %s catch yaw %.0f #%d", keys,
+			fromApex ? "apex" : "ground", aim.yaw(), trial);
+		reset(context, server);
+		
+		if(!fromApex)
+		{
+			context.runOnClient(mc -> holdKeys(mc, keys));
+			context.waitTicks(10);
+		}
+		
+		// the hack uses a fixed delay, see Options
+		serverGap = -1;
+		Vec3 start = playerPos(context);
+		List<Result> results = run(context, name, 150, r -> {
+			if(fromApex)
+			{
+				r.enqueue(WindChargeJump.atFeet(false));
+				r.enqueue(new PearlCatch(aim, 3), StartCondition.atApex());
+			}else
+				r.enqueue(new PearlCatch(aim, 3));
+		}, mc -> {
+			if(fromApex && !mc.player.onGround())
+				holdKeys(mc, keys);
+		});
+		releaseKeys(context);
+		
+		Result c = results.isEmpty() ? null : results.getLast();
+		Caught caught = c == null ? null : c.payload(Caught.class);
+		double error = caught == null ? Double.NaN
+			: caught.teleportedTo().distanceTo(c.prediction().endPos());
+		LOGGER.info(
+			"SM: {} status={} reason={} delay={} p={} serverGap={} from {} to {} predicted {} error={}",
+			name, c == null ? "none" : c.status(),
+			c == null ? null : c.reason(),
+			caught == null ? "?" : caught.delay(),
+			c == null || c.prediction() == null ? "?"
+				: fmt(c.prediction().pSuccess()),
+			serverGap, fmt(c == null ? start : c.startPos()),
+			fmt(caught == null ? null : caught.teleportedTo()),
+			fmt(c == null || c.prediction() == null ? null
+				: c.prediction().endPos()),
+			fmt(error));
+		return caught != null && error <= 1.5;
+	}
+	
+	/** Holds W, A, S, D and sprint ("R") as listed in {@code keys}. */
+	private static void holdKeys(Minecraft mc, String keys)
+	{
+		mc.options.keyUp.setDown(keys.contains("W"));
+		mc.options.keyLeft.setDown(keys.contains("A"));
+		mc.options.keyDown.setDown(keys.contains("S"));
+		mc.options.keyRight.setDown(keys.contains("D"));
+		mc.options.keySprint.setDown(keys.contains("R"));
 	}
 	
 	private void runCombatTests(ClientGameTestContext context,
@@ -1463,12 +1589,22 @@ public final class SpearMaceTest implements FabricClientGameTest
 		String projectiles = server.computeOnServer(mc -> {
 			ServerPlayer p = getServerPlayer(mc);
 			StringBuilder sb = new StringBuilder();
+			int pearlAge = -1;
+			int chargeAge = -1;
 			for(Entity e : p.level().getEntities(p,
 				p.getBoundingBox().inflate(64),
 				e -> e instanceof ThrownEnderpearl || e instanceof WindCharge))
+			{
 				sb.append(String.format(" %s#%d age=%d pos=%s vel=%s",
 					e instanceof WindCharge ? "charge" : "pearl", e.getId(),
 					e.tickCount, fmt(e.position()), fmt(e.getDeltaMovement())));
+				if(e instanceof WindCharge)
+					chargeAge = e.tickCount;
+				else
+					pearlAge = e.tickCount;
+			}
+			if(serverGap < 0 && pearlAge >= 0 && chargeAge >= 0)
+				serverGap = pearlAge - chargeAge;
 			if(targetId >= 0
 				&& p.level().getEntity(targetId) instanceof LivingEntity t)
 			{
@@ -1558,6 +1694,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 	{
 		context.runOnClient(mc -> {
 			IKeyMapping.get(mc.options.keyUp).resetDownState();
+			IKeyMapping.get(mc.options.keyDown).resetDownState();
+			IKeyMapping.get(mc.options.keyLeft).resetDownState();
+			IKeyMapping.get(mc.options.keyRight).resetDownState();
 			IKeyMapping.get(mc.options.keySprint).resetDownState();
 			IKeyMapping.get(mc.options.keyJump).resetDownState();
 			mc.player.setSprinting(false);

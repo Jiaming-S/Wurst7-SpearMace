@@ -41,9 +41,9 @@ public final class PlayerSim
 	public Vec3 vel;
 	public boolean onGround;
 	
-	/** Movement input: yaw of the forward key, if it is held. */
+	/** Movement input: the view's yaw, which the keys move relative to. */
 	public float yaw;
-	public boolean forward;
+	public Move move = Move.NONE;
 	public boolean sprinting;
 	public boolean jump;
 	
@@ -61,7 +61,7 @@ public final class PlayerSim
 		PlayerSim sim = new PlayerSim(MC.level, MC.player.position(),
 			MC.player.getDeltaMovement(), MC.player.onGround());
 		sim.yaw = MC.player.getYRot();
-		sim.forward = MC.options.keyUp.isDown();
+		sim.move = Move.ofHeldKeys();
 		sim.sprinting = MC.player.isSprinting();
 		sim.jump = MC.options.keyJump.isDown();
 		return sim;
@@ -73,7 +73,7 @@ public final class PlayerSim
 		PlayerSim sim =
 			new PlayerSim(level, state.pos(), state.vel(), state.onGround());
 		sim.yaw = state.yaw();
-		sim.forward = state.forward();
+		sim.move = state.move();
 		sim.sprinting = state.sprinting();
 		sim.jump = state.jump();
 		return sim;
@@ -90,7 +90,7 @@ public final class PlayerSim
 		PlayerSim sim =
 			new PlayerSim(level, before.pos(), before.vel(), before.onGround());
 		sim.yaw = after.yaw();
-		sim.forward = after.forward();
+		sim.move = after.move();
 		sim.sprinting = after.sprinting();
 		sim.jump = after.jump();
 		sim.step();
@@ -101,7 +101,7 @@ public final class PlayerSim
 	{
 		PlayerSim sim = new PlayerSim(level, pos, vel, onGround);
 		sim.yaw = yaw;
-		sim.forward = forward;
+		sim.move = move;
 		sim.sprinting = sprinting;
 		sim.jump = jump;
 		return sim;
@@ -115,6 +115,10 @@ public final class PlayerSim
 		double vz = Math.abs(vel.z) < 0.003 ? 0 : vel.z;
 		vel = new Vec3(vx, vy, vz);
 		
+		// LocalPlayer.aiStep(): sprinting stops without forward input
+		if(!move.hasForwardImpulse())
+			sprinting = false;
+		
 		if(jump && onGround)
 		{
 			vel = new Vec3(vel.x, 0.42, vel.z);
@@ -126,20 +130,13 @@ public final class PlayerSim
 		}
 		
 		float blockFriction = onGround ? getBlockFriction() : 1;
-		if(forward)
-		{
-			float speed;
-			if(onGround)
-				speed = (sprinting ? 0.13F : 0.1F) * (0.21600002F
-					/ (blockFriction * blockFriction * blockFriction));
-			else
-				speed = sprinting ? 0.025999999F : 0.02F;
-			
-			// input is scaled by 0.98 in aiStep(), then moveRelative()
-			float rad = yaw * Mth.DEG_TO_RAD;
-			double accel = 0.98F * speed;
-			vel = vel.add(-Mth.sin(rad) * accel, 0, Mth.cos(rad) * accel);
-		}
+		float speed;
+		if(onGround)
+			speed = (sprinting ? 0.13F : 0.1F) * (0.21600002F
+				/ (blockFriction * blockFriction * blockFriction));
+		else
+			speed = sprinting ? 0.025999999F : 0.02F;
+		vel = vel.add(move.acceleration(speed, yaw));
 		
 		Vec3 move = Entity.collideBoundingBox(MC.player, vel, box(pos), level,
 			List.of());

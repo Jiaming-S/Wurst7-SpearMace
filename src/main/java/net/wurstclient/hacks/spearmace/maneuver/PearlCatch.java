@@ -40,8 +40,11 @@ import net.wurstclient.util.Rotation;
  * charge catches it early, a late one further along. Before the pearl is
  * visible, the charge is aimed at its average flight path. Once the real
  * pearl shows up, the aim is redone with its actual velocity, which removes
- * the pearl's own random spread. The wind charge's spread remains, so long
- * delays get unreliable; {@link #maxFeasibleDelay} finds that limit.
+ * the pearl's own random spread. The aim is redone once more right before
+ * the wind charge is thrown, from where the player really is, so held keys
+ * and knockback only matter for the tick between the click and the throw.
+ * The wind charge's spread remains, so long delays get unreliable;
+ * {@link #maxFeasibleDelay} finds that limit.
  *
  * @param delay
  *            updates between the pearl click and the wind charge click, at
@@ -117,7 +120,7 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 			return Step.fail("no delay catches the pearl");
 		
 		int now = self.tick();
-		List<PlayerSim> track = newTrack(level, self);
+		List<PlayerSim> track = newTrack(level, self, pearlAim.yaw());
 		PearlInfo nominal = nominalPearl(pearlAim, track, now);
 		Plan expected = planFromHere(level, d, track, nominal, now);
 		if(expected == null)
@@ -171,7 +174,7 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 	public static List<Option> survey(Level level, SelfState self,
 		Rotation pearlAim, int maxDelay)
 	{
-		List<PlayerSim> track = newTrack(level, self);
+		List<PlayerSim> track = newTrack(level, self, pearlAim.yaw());
 		PearlInfo nominal = nominalPearl(pearlAim, track, 0);
 		ArrayList<Option> options = new ArrayList<>();
 		for(int delay = 1; delay <= maxDelay; delay++)
@@ -199,16 +202,22 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 	public static int maxFeasibleDelay(Level level, SelfState self,
 		Rotation pearlAim, double minChance)
 	{
-		List<PlayerSim> track = newTrack(level, self);
+		List<PlayerSim> track = newTrack(level, self, pearlAim.yaw());
 		PearlInfo nominal = nominalPearl(pearlAim, track, 0);
 		return newPlanner(level, false).maxFeasibleDelay(nominal, 0, track,
 			minChance, MAX_DELAY, MAX_CATCH_MOVE);
 	}
 	
-	private static List<PlayerSim> newTrack(Level level, SelfState self)
+	/**
+	 * The player's predicted states from {@code self}, moving relative to
+	 * {@code yaw} as the throw turns the view there.
+	 */
+	private static List<PlayerSim> newTrack(Level level, SelfState self,
+		float yaw)
 	{
-		return PearlCatchPlanner.track(PlayerSim.of(level, self),
-			MAX_CATCH_MOVE + 8);
+		PlayerSim start = PlayerSim.of(level, self);
+		start.yaw = yaw;
+		return PearlCatchPlanner.track(start, MAX_CATCH_MOVE + 8);
 	}
 	
 	/** The pearl clicked at update {@code now}, see the planner timeline. */
@@ -238,7 +247,8 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 	
 	/**
 	 * The pearl is in the air: throw the wind charge on time, re-aim it
-	 * once the real pearl shows up, and wait for the teleport.
+	 * once the real pearl shows up and again right before the throw, and
+	 * wait for the teleport.
 	 *
 	 * @param chargeTick
 	 *            when the wind charge was clicked, or -1
@@ -267,18 +277,25 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 			
 			PearlInFlight seen = findPearl(self);
 			PearlInfo info = this.info;
-			Plan plan = this.plan;
 			if(seen != null && seen.entityId() >= 0 && !info.observed())
-			{
 				// once the real pearl shows up, its spread is known
 				info = new PearlInfo(seen.toSim(), tick - seen.age(),
 					info.dir(), info.knownMovement(), info.onGround(), true);
-				Plan replanned = chargeTick >= 0 ? null
-					: newPlanner(level, true).plan(info, tick,
-						newTrack(level, self), clickTick + delay, 0,
-						MAX_CATCH_MOVE);
+				
+			// held keys and knockback only show up in the observed state,
+			// so the last aim before the throw starts from there
+			Plan plan = this.plan;
+			boolean throwNow = chargeTick < 0 && tick >= plan.throwTick();
+			if(chargeTick < 0 && (throwNow || info != this.info))
+			{
+				Plan replanned = newPlanner(level, true).plan(info, tick,
+					newTrack(level, self, self.yaw()),
+					Math.max(tick, clickTick + delay), 0, MAX_CATCH_MOVE);
 				if(replanned != null)
 					plan = replanned;
+				else if(throwNow)
+					return Step.fail("no wind charge aim catches the pearl"
+						+ " from here any more");
 			}
 			
 			if(seen == null && tick - pearlTick > MAX_MISSING)
@@ -289,7 +306,7 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 			
 			TickInput input = TickInput.NONE;
 			int chargeTick = this.chargeTick;
-			if(chargeTick < 0 && tick >= plan.throwTick())
+			if(throwNow)
 			{
 				input = TickInput.NONE.withRotation(plan.aim())
 					.withSlot(chargeSlot).withUse();

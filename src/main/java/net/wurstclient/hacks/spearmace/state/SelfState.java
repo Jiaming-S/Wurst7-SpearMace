@@ -20,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.sim.Move;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
 import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
@@ -31,8 +32,8 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
  *
  * @param tick
  *            the player's {@code tickCount}
- * @param forward
- *            whether the forward key is held, see {@link PlayerSim}
+ * @param move
+ *            the movement keys held, see {@link PlayerSim}
  * @param jump
  *            whether the jump key is held
  * @param heldChanged
@@ -46,11 +47,10 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
  *            the {@code EXPLOSION_KNOCKBACK_RESISTANCE} attribute
  */
 public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
-	double fallDistance, float yaw, float pitch, boolean forward,
-	boolean sprinting, boolean jump, boolean fallFlying,
-	int attackStrengthTicker, boolean heldChanged, int missTime,
-	double interactionRange, double knockbackResistance, Kit kit,
-	List<Pending> pending)
+	double fallDistance, float yaw, float pitch, Move move, boolean sprinting,
+	boolean jump, boolean fallFlying, int attackStrengthTicker,
+	boolean heldChanged, int missTime, double interactionRange,
+	double knockbackResistance, Kit kit, List<Pending> pending)
 {
 	private static final Minecraft MC = WurstClient.MC;
 	
@@ -64,7 +64,7 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 		return new SelfState(MC.player.tickCount, MC.player.position(),
 			MC.player.getDeltaMovement(), MC.player.onGround(),
 			MC.player.fallDistance, MC.player.getYRot(), MC.player.getXRot(),
-			MC.options.keyUp.isDown(), MC.player.isSprinting(),
+			Move.ofHeldKeys(), MC.player.isSprinting(),
 			MC.options.keyJump.isDown(), MC.player.isFallFlying(),
 			MC.player.attackStrengthTicker,
 			!ItemStack.isSameItem(MC.player.lastItemInMainHand,

@@ -7,6 +7,7 @@
  */
 package net.wurstclient.hacks.spearmace.model;
 
+import net.wurstclient.hacks.spearmace.sim.Move;
 import net.wurstclient.util.Rotation;
 
 /**
@@ -18,40 +19,38 @@ import net.wurstclient.util.Rotation;
  * @param slot
  *            the hotbar key to click, or -1
  */
-public record TickInput(Rotation rotation, boolean forward, boolean sprint,
+public record TickInput(Rotation rotation, Move move, boolean sprint,
 	boolean jump, int slot, boolean attack, boolean use)
 {
 	/** Keeps looking where it does and holds nothing. */
 	public static final TickInput NONE =
-		new TickInput(null, false, false, false, -1, false, false);
+		new TickInput(null, Move.NONE, false, false, -1, false, false);
 	
 	public TickInput withRotation(Rotation newRotation)
 	{
-		return new TickInput(newRotation, forward, sprint, jump, slot, attack,
+		return new TickInput(newRotation, move, sprint, jump, slot, attack,
 			use);
 	}
 	
 	public TickInput withSlot(int newSlot)
 	{
-		return new TickInput(rotation, forward, sprint, jump, newSlot, attack,
+		return new TickInput(rotation, move, sprint, jump, newSlot, attack,
 			use);
 	}
 	
 	public TickInput withAttack()
 	{
-		return new TickInput(rotation, forward, sprint, jump, slot, true, use);
+		return new TickInput(rotation, move, sprint, jump, slot, true, use);
 	}
 	
 	public TickInput withUse()
 	{
-		return new TickInput(rotation, forward, sprint, jump, slot, attack,
-			true);
+		return new TickInput(rotation, move, sprint, jump, slot, attack, true);
 	}
 	
 	public TickInput withJump()
 	{
-		return new TickInput(rotation, forward, sprint, true, slot, attack,
-			use);
+		return new TickInput(rotation, move, sprint, true, slot, attack, use);
 	}
 	
 	@Override
@@ -61,8 +60,8 @@ public record TickInput(Rotation rotation, boolean forward, boolean sprint,
 		if(rotation != null)
 			sb.append(String.format("rot=(%.1f, %.1f)", rotation.yaw(),
 				rotation.pitch()));
-		if(forward)
-			sb.append(" forward");
+		if(move.isMoving())
+			sb.append(" move=").append(move);
 		if(sprint)
 			sb.append(" sprint");
 		if(jump)

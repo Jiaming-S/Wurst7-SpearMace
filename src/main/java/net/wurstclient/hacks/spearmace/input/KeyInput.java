@@ -15,6 +15,7 @@ import net.minecraft.world.item.ItemStack;
 import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.spearmace.action.Channel;
 import net.wurstclient.hacks.spearmace.model.TickInput;
+import net.wurstclient.hacks.spearmace.sim.Move;
 import net.wurstclient.mixinterface.IKeyMapping;
 import net.wurstclient.util.Rotation;
 
@@ -71,7 +72,7 @@ public enum KeyInput
 		boolean now = clickTick == MC.player.tickCount;
 		return new TickInput(
 			new Rotation(MC.player.getYRot(), MC.player.getXRot()),
-			MC.options.keyUp.isDown(), MC.player.isSprinting(),
+			Move.ofHeldKeys(), MC.player.isSprinting(),
 			MC.options.keyJump.isDown(), now ? clickedSlot : -1,
 			now && clickedAttack, now && clickedUse);
 	}
@@ -97,7 +98,10 @@ public enum KeyInput
 			look(input.rotation());
 		if(claims.contains(Channel.MOVE))
 		{
-			hold(MC.options.keyUp, input.forward());
+			hold(MC.options.keyUp, input.move().forward() > 0);
+			hold(MC.options.keyDown, input.move().forward() < 0);
+			hold(MC.options.keyLeft, input.move().left() > 0);
+			hold(MC.options.keyRight, input.move().left() < 0);
 			hold(MC.options.keySprint, input.sprint());
 		}
 		if(claims.contains(Channel.JUMP))
@@ -114,6 +118,9 @@ public enum KeyInput
 	public static void releaseAll()
 	{
 		hold(MC.options.keyUp, false);
+		hold(MC.options.keyDown, false);
+		hold(MC.options.keyLeft, false);
+		hold(MC.options.keyRight, false);
 		hold(MC.options.keySprint, false);
 		hold(MC.options.keyJump, false);
 	}
