@@ -8,19 +8,17 @@
 package net.wurstclient.hacks.spearmace.maneuver;
 
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Predicate;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.state.Kit;
 
 /** Finds the hotbar slots that maneuvers need. */
 public enum Hotbar
@@ -42,30 +40,19 @@ public enum Hotbar
 	/** @return a hotbar slot holding wind charges that are ready, or -1 */
 	public static int windCharge()
 	{
-		return readySlot(s -> s.is(Items.WIND_CHARGE));
+		return Kit.live().windCharge();
 	}
 	
 	/** @return a hotbar slot holding ender pearls that are ready, or -1 */
 	public static int enderPearl()
 	{
-		return readySlot(s -> s.is(Items.ENDER_PEARL));
+		return Kit.live().enderPearl();
 	}
 	
 	/** @return the hotbar slot of the spear with the best Lunge, or -1 */
 	public static int lungeSpear()
 	{
-		int best = -1;
-		int bestLevel = 0;
-		for(int i = 0; i < Inventory.getSelectionSize(); i++)
-		{
-			int level = lungeLevel(get(i));
-			if(level > bestLevel)
-			{
-				best = i;
-				bestLevel = level;
-			}
-		}
-		return best;
+		return Kit.live().lungeSpear();
 	}
 	
 	public static int lungeLevel(ItemStack stack)
@@ -90,24 +77,7 @@ public enum Hotbar
 	 */
 	public static int hand()
 	{
-		if(isHand(get(selected())))
-			return selected();
-		
-		int any = -1;
-		int empty = -1;
-		for(int i = 0; i < Inventory.getSelectionSize(); i++)
-		{
-			ItemStack stack = get(i);
-			if(!isHand(stack))
-				continue;
-			if(stack.is(Items.WIND_CHARGE))
-				return i;
-			if(stack.isEmpty() && empty < 0)
-				empty = i;
-			if(any < 0)
-				any = i;
-		}
-		return empty >= 0 ? empty : any;
+		return Kit.live().hand();
 	}
 	
 	public static boolean isHand(ItemStack stack)
@@ -118,17 +88,5 @@ public enum Hotbar
 				changesSpeed.set(true);
 		});
 		return !changesSpeed.get();
-	}
-	
-	private static int readySlot(Predicate<ItemStack> item)
-	{
-		for(int i = 0; i < Inventory.getSelectionSize(); i++)
-		{
-			ItemStack stack = get(i);
-			if(item.test(stack)
-				&& !MC.player.getCooldowns().isOnCooldown(stack))
-				return i;
-		}
-		return -1;
 	}
 }

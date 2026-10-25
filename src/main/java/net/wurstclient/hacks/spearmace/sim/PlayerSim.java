@@ -17,6 +17,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
  * Tick-exact model of the local player's own movement
@@ -63,6 +64,18 @@ public final class PlayerSim
 		sim.forward = MC.options.keyUp.isDown();
 		sim.sprinting = MC.player.isSprinting();
 		sim.jump = MC.options.keyJump.isDown();
+		return sim;
+	}
+	
+	/** Starts from {@code state}, including the keys it is holding. */
+	public static PlayerSim of(Level level, SelfState state)
+	{
+		PlayerSim sim =
+			new PlayerSim(level, state.pos(), state.vel(), state.onGround());
+		sim.yaw = state.yaw();
+		sim.forward = state.forward();
+		sim.sprinting = state.sprinting();
+		sim.jump = state.jump();
 		return sim;
 	}
 	

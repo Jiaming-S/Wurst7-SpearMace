@@ -13,11 +13,14 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.AttackRange;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.TargetSim;
+import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.state.TargetState;
 import net.wurstclient.util.Rotation;
 
 /**
@@ -46,7 +49,7 @@ public final class Engagement
 	 */
 	public static final double SERVER_BUFFER = 3.0;
 	
-	private final LivingEntity target;
+	private final GameState state;
 	private final Vec3[] selfPos = new Vec3[HORIZON + 1];
 	private final Vec3[] selfVel = new Vec3[HORIZON + 1];
 	private final double[] fall = new double[HORIZON + 1];
@@ -54,14 +57,14 @@ public final class Engagement
 	private final Vec3[] targetPos = new Vec3[HORIZON + 1];
 	private int landing = HORIZON + 1;
 	
-	private Engagement(LivingEntity target)
+	private Engagement(Level level, GameState state)
 	{
-		this.target = target;
+		this.state = state;
 		
-		PlayerSim self = PlayerSim.ofLocalPlayer();
-		TargetSim other = TargetSim.of(target);
-		double fallDistance = MC.player.fallDistance;
-		if(MC.player.onGround())
+		PlayerSim self = PlayerSim.of(level, state.self());
+		TargetSim other = TargetSim.of(level, state.target());
+		double fallDistance = state.self().fallDistance();
+		if(state.self().onGround())
 			landing = 0;
 		
 		for(int i = 0; i <= HORIZON; i++)
@@ -90,14 +93,22 @@ public final class Engagement
 		}
 	}
 	
-	public static Engagement now(LivingEntity target)
+	/** Predicts from {@code state} in {@code level}. */
+	public static Engagement of(Level level, GameState state)
 	{
-		return new Engagement(target);
+		return new Engagement(level, state);
 	}
 	
-	public LivingEntity target()
+	/** Predicts from the current state of the player and {@code target}. */
+	public static Engagement now(LivingEntity target)
 	{
-		return target;
+		return of(MC.level, GameState.capture(target));
+	}
+	
+	/** The state this prediction starts from. */
+	public GameState state()
+	{
+		return state;
 	}
 	
 	/** The first index at which the player stands on the ground. */
@@ -193,7 +204,7 @@ public final class Engagement
 		}
 		
 		// otherwise it falls back to the normal pick
-		double reach = MC.player.entityInteractionRange() - REACH_SAFETY;
+		double reach = state.self().interactionRange() - REACH_SAFETY;
 		return box.contains(eye)
 			|| box.clip(eye, eye.add(look.scale(reach))).isPresent();
 	}
@@ -214,8 +225,7 @@ public final class Engagement
 	/** Whether the target is holding up a shield or something like it. */
 	public static boolean shieldRaised(LivingEntity target)
 	{
-		return target.isUsingItem()
-			&& target.getUseItem().has(DataComponents.BLOCKS_ATTACKS);
+		return TargetState.shieldRaised(target);
 	}
 	
 	/**
@@ -225,10 +235,10 @@ public final class Engagement
 	 */
 	public boolean shieldFacingUs(int i)
 	{
-		if(!shieldRaised(target))
+		if(!state.target().shieldRaised())
 			return false;
 		
-		float yaw = target.getYHeadRot() * Mth.DEG_TO_RAD;
+		float yaw = state.target().headYaw() * Mth.DEG_TO_RAD;
 		Vec3 view = new Vec3(-Mth.sin(yaw), 0, Mth.cos(yaw));
 		Vec3 toUs = selfPos[i].subtract(targetPos[i]);
 		toUs = new Vec3(toUs.x, 0, toUs.z).normalize();

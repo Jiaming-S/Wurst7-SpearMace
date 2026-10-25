@@ -38,6 +38,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.hacks.spearmace.combat.Engage;
+import net.wurstclient.hacks.spearmace.combat.Engagement;
 import net.wurstclient.hacks.spearmace.combat.EscapeLunge;
 import net.wurstclient.hacks.spearmace.combat.Loadout;
 import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
@@ -53,6 +54,13 @@ import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner.StartCondition;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
 import net.wurstclient.hacks.spearmace.maneuver.WindChargeJump;
+import net.wurstclient.hacks.spearmace.sim.PlayerSim;
+import net.wurstclient.hacks.spearmace.sim.TargetSim;
+import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.state.Kit;
+import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
+import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
+import net.wurstclient.hacks.spearmace.state.SelfState;
 import net.wurstclient.mixinterface.IKeyMapping;
 import net.wurstclient.util.Rotation;
 
@@ -138,6 +146,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 			context.waitTicks(2);
 			spContext.getConnection().waitForChunksRender();
 			
+			testStateCapture(context, server, failures);
+			
 			if(runs("movement"))
 			{
 				testWindChargeStanding(context, server, failures, false);
@@ -160,6 +170,124 @@ public final class SpearMaceTest implements FabricClientGameTest
 				"SpearMace tests failed:\n" + String.join("\n", failures));
 		
 		LOGGER.info("SpearMace tests passed");
+	}
+	
+	/**
+	 * Checks that {@link GameState#capture} matches the live game, survives
+	 * inventory changes, sees the player's projectiles and cooldowns, and
+	 * that the sims predict the same from a state as from the live player.
+	 */
+	private void testStateCapture(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "State capture";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		context.waitFor(mc -> clientEntity(golem) != null);
+		
+		context.runOnClient(mc -> {
+			GameState state = GameState.capture(clientEntity(golem));
+			SelfState self = state.self();
+			LOGGER.info("SM: {} standing {}", name, state);
+			check(failures, name, "pos",
+				self.pos().equals(mc.player.position()));
+			check(failures, name, "onGround", self.onGround());
+			check(failures, name, "selected",
+				self.kit().selected() == HAND_SLOT);
+			check(failures, name, "mace slot", self.kit().mace() == 4);
+			check(failures, name, "spear slot",
+				self.kit().spear() == SPEAR_SLOT);
+			check(failures, name, "wind charge slot",
+				self.kit().windCharge() == 2);
+			check(failures, name, "attack delay",
+				Math.abs(self.kit().attackDelay(self.kit().held())
+					- mc.player.getCurrentItemAttackStrengthDelay()) < 1e-6);
+			check(failures, name, "target pos",
+				state.target().pos().equals(clientEntity(golem).position()));
+			check(failures, name, "target box", state.target().box()
+				.equals(clientEntity(golem).getBoundingBox()));
+			check(failures, name, "no projectiles", self.pending().isEmpty());
+		});
+		
+		// the snapshot keeps its items when the inventory changes
+		GameState[] before = new GameState[1];
+		context.runOnClient(
+			mc -> before[0] = GameState.capture(clientEntity(golem)));
+		runCommand(server, "clear");
+		context.waitTicks(2);
+		context.runOnClient(mc -> {
+			Kit kit = before[0].self().kit();
+			check(failures, name, "snapshot mace", kit.mace() == 4
+				&& kit.get(4).is(Items.MACE) && Loadout.mace() < 0);
+		});
+		
+		// a wind charge thrown ahead, then a pearl straight up
+		reset(context, server);
+		context.runOnClient(mc -> {
+			KeyInput.look(new Rotation(0, 0));
+			KeyInput.selectSlot(2);
+			KeyInput.clickUse();
+		});
+		context.waitTicks(3);
+		context.runOnClient(mc -> {
+			KeyInput.look(UP);
+			KeyInput.selectSlot(3);
+			KeyInput.clickUse();
+		});
+		context.waitTicks(PearlCatch.SEEN_DELAY + 1);
+		context.runOnClient(mc -> {
+			SelfState self = SelfState.capture();
+			LOGGER.info("SM: {} after throws {}", name, self);
+			Kit kit = self.kit();
+			ItemStack charge = mc.player.getInventory().getItem(2);
+			ItemStack pearl = mc.player.getInventory().getItem(3);
+			check(failures, name, "charge cooldown " + kit.cooldown(charge),
+				kit.cooldown(charge) > 0 && kit.cooldown(charge) < 10
+					&& mc.player.getCooldowns().isOnCooldown(charge));
+			check(failures, name, "pearl cooldown " + kit.cooldown(pearl),
+				kit.cooldown(pearl) > 10 && kit.cooldown(pearl) < 20);
+			check(failures, name, "charge not ready", kit.windCharge() < 0);
+			check(failures, name, "wind charge in flight",
+				self.pending(WindChargeInFlight.class).size() == 1);
+			check(failures, name, "pearl in flight",
+				self.pending(PearlInFlight.class).size() == 1);
+		});
+		
+		// sims started from a state match sims started from the live game
+		reset(context, server);
+		int golem2 =
+			spawnGolem(server, TARGET_X, GROUND_Y + 5, TARGET_Z, false);
+		runCommand(server, "tp @p " + TARGET_X + " " + (GROUND_Y + 10) + " "
+			+ (TARGET_Z - 2) + " 0 90");
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(golem2) != null);
+		context.runOnClient(mc -> {
+			GameState state = GameState.capture(clientEntity(golem2));
+			PlayerSim fromState = PlayerSim.of(mc.level, state.self());
+			PlayerSim live = PlayerSim.ofLocalPlayer();
+			TargetSim targetFromState = TargetSim.of(mc.level, state.target());
+			TargetSim targetLive = TargetSim.of(clientEntity(golem2));
+			for(int i = 0; i < 30; i++)
+			{
+				fromState.step();
+				live.step();
+				targetFromState.step();
+				targetLive.step();
+			}
+			check(failures, name, "player sim", fromState.pos.equals(live.pos));
+			check(failures, name, "target sim",
+				targetFromState.pos.equals(targetLive.pos));
+			Engagement e = Engagement.of(mc.level, state);
+			check(failures, name, "engagement landing " + e.landing(),
+				e.landing() > 0 && e.landing() <= Engagement.HORIZON);
+		});
+	}
+	
+	private static void check(List<String> failures, String name, String what,
+		boolean ok)
+	{
+		if(!ok)
+			failures.add(name + ": " + what);
 	}
 	
 	private void testWindChargeStanding(ClientGameTestContext context,

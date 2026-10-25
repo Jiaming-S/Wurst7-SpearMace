@@ -7,26 +7,14 @@
  */
 package net.wurstclient.hacks.spearmace.combat;
 
-import java.util.function.ToDoubleFunction;
-
-import net.minecraft.client.Minecraft;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.tags.ItemTags;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.ai.attributes.Attribute;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
-import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.item.component.Weapon;
 import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.Enchantments;
-import net.wurstclient.WurstClient;
-import net.wurstclient.hacks.spearmace.maneuver.Hotbar;
+import net.wurstclient.hacks.spearmace.state.Kit;
 
 /**
  * Finds the combat items in the hotbar and reads the stats that matter for
@@ -35,8 +23,6 @@ import net.wurstclient.hacks.spearmace.maneuver.Hotbar;
 public enum Loadout
 {
 	;
-	
-	private static final Minecraft MC = WurstClient.MC;
 	
 	/** Reach of items without an {@code ATTACK_RANGE} component. */
 	public static final double DEFAULT_REACH = 3.0;
@@ -55,38 +41,30 @@ public enum Loadout
 	/** @return the hotbar slot of the mace with the best Wind Burst, or -1 */
 	public static int mace()
 	{
-		return best(
-			s -> s.is(Items.MACE) ? 1 + level(s, Enchantments.WIND_BURST) : 0);
+		return Kit.live().mace();
 	}
 	
 	/** @return the hotbar slot of the spear with the most reach, or -1 */
 	public static int spear()
 	{
-		return best(s -> s.has(DataComponents.PIERCING_WEAPON)
-			? reach(s).maxReach() : 0);
+		return Kit.live().spear();
 	}
 	
 	/** @return the hotbar slot of the strongest sword, or -1 */
 	public static int sword()
 	{
-		return best(s -> s.is(ItemTags.SWORDS) ? attackDamage(s) : 0);
+		return Kit.live().sword();
 	}
 	
 	/** @return the hotbar slot of an item that disables shields, or -1 */
 	public static int axe()
 	{
-		return best(Loadout::disableBlockingSeconds);
+		return Kit.live().axe();
 	}
 	
 	public static int slotFor(PreItem pre)
 	{
-		return switch(pre)
-		{
-			case SPEAR -> spear();
-			case SWORD -> sword();
-			case AXE -> axe();
-			case HAND -> Hotbar.hand();
-		};
+		return Kit.live().slotFor(pre);
 	}
 	
 	/**
@@ -96,13 +74,13 @@ public enum Loadout
 	 */
 	public static double attackDelay(ItemStack stack)
 	{
-		return 20 / attribute(stack, Attributes.ATTACK_SPEED);
+		return Kit.live().attackDelay(stack);
 	}
 	
 	/** The {@code ATTACK_DAMAGE} attribute while holding {@code stack}. */
 	public static double attackDamage(ItemStack stack)
 	{
-		return attribute(stack, Attributes.ATTACK_DAMAGE);
+		return Kit.live().attackDamage(stack);
 	}
 	
 	/**
@@ -132,37 +110,5 @@ public enum Loadout
 				return stack.getEnchantments().getLevel(ench);
 			
 		return 0;
-	}
-	
-	/**
-	 * The player's base value plus the stack's flat main hand modifiers,
-	 * ignoring effects and other equipment.
-	 */
-	private static double attribute(ItemStack stack,
-		Holder<Attribute> attribute)
-	{
-		double[] value = {MC.player.getAttributeBaseValue(attribute)};
-		stack.forEachModifier(EquipmentSlot.MAINHAND, (attr, modifier) -> {
-			if(attr.is(attribute) && modifier
-				.operation() == AttributeModifier.Operation.ADD_VALUE)
-				value[0] += modifier.amount();
-		});
-		return value[0];
-	}
-	
-	private static int best(ToDoubleFunction<ItemStack> score)
-	{
-		int best = -1;
-		double bestScore = 0;
-		for(int i = 0; i < Inventory.getSelectionSize(); i++)
-		{
-			double s = score.applyAsDouble(Hotbar.get(i));
-			if(s > bestScore)
-			{
-				best = i;
-				bestScore = s;
-			}
-		}
-		return best;
 	}
 }

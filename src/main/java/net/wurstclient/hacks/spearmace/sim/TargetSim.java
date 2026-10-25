@@ -10,11 +10,14 @@ package net.wurstclient.hacks.spearmace.sim;
 import java.util.List;
 
 import net.minecraft.world.entity.Entity;
+import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.state.TargetState;
 
 /**
  * Rough model of another entity's motion as the client sees it: it keeps
@@ -25,52 +28,51 @@ import net.minecraft.world.phys.Vec3;
  * The client shows other entities a few ticks late, interpolating toward
  * the positions the server sends. The crosshair pick uses that lagged box,
  * so the velocity comes from the last two client positions rather than
- * from the server's velocity.
+ * from the server's velocity (see {@link TargetState}).
  */
 public final class TargetSim
 {
+	private static final Minecraft MC = WurstClient.MC;
+	
 	private final Level level;
+	private final TargetState state;
+	
+	/** The entity, for block collisions that depend on it, or null. */
 	private final Entity entity;
-	private final double halfWidth;
-	private final double height;
-	private final double eyeHeight;
-	private final boolean moves;
 	
 	public Vec3 pos;
 	public Vec3 vel;
 	public boolean onGround;
 	
-	private TargetSim(Level level, Entity entity, Vec3 pos, Vec3 vel,
-		boolean onGround, boolean moves)
+	private TargetSim(Level level, TargetState state)
 	{
 		this.level = level;
-		this.entity = entity;
-		halfWidth = entity.getBbWidth() / 2;
-		height = entity.getBbHeight();
-		eyeHeight = entity.getEyeHeight();
-		this.pos = pos;
-		this.vel = vel;
-		this.onGround = onGround;
-		this.moves = moves;
+		this.state = state;
+		entity = level.getEntity(state.entityId());
+		pos = state.pos();
+		vel = state.vel();
+		onGround = state.onGround();
+	}
+	
+	public static TargetSim of(Level level, TargetState state)
+	{
+		return new TargetSim(level, state);
 	}
 	
 	public static TargetSim of(LivingEntity target)
 	{
-		// NoAI mobs skip travel(), so they don't even fall
-		boolean moves = !(target instanceof Mob mob && mob.isNoAi())
-			&& !target.isNoGravity();
-		Vec3 vel = target.position().subtract(target.oldPosition());
-		return new TargetSim(target.level(), target, target.position(),
-			moves ? vel : Vec3.ZERO, target.onGround(), moves);
+		return of(MC.level, TargetState.capture(target));
 	}
 	
 	public void step()
 	{
-		if(!moves)
+		if(!state.moves())
 			return;
 		
-		Vec3 move =
-			Entity.collideBoundingBox(entity, vel, box(), level, List.of());
+		Vec3 move = entity != null
+			? Entity.collideBoundingBox(entity, vel, box(), level, List.of())
+			: Entity.collideBoundingBox(CollisionContext.empty(), vel, box(),
+				level, List.of());
 		boolean collidedY = move.y != vel.y;
 		onGround = collidedY && vel.y < 0;
 		pos = pos.add(move);
@@ -86,12 +88,11 @@ public final class TargetSim
 	
 	public AABB box()
 	{
-		return new AABB(pos.x - halfWidth, pos.y, pos.z - halfWidth,
-			pos.x + halfWidth, pos.y + height, pos.z + halfWidth);
+		return state.box(pos);
 	}
 	
 	public Vec3 eyePos()
 	{
-		return pos.add(0, eyeHeight, 0);
+		return pos.add(0, state.eyeHeight(), 0);
 	}
 }

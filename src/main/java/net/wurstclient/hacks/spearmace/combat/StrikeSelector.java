@@ -10,15 +10,14 @@ package net.wurstclient.hacks.spearmace.combat;
 import java.util.ArrayList;
 import java.util.List;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantments;
-import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
-import net.wurstclient.hacks.spearmace.maneuver.Hotbar;
 import net.wurstclient.hacks.spearmace.maneuver.Maneuver;
 import net.wurstclient.hacks.spearmace.sim.StrikeModel;
+import net.wurstclient.hacks.spearmace.state.Kit;
+import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
  * Picks how to hit a target while falling:
@@ -33,8 +32,6 @@ import net.wurstclient.hacks.spearmace.sim.StrikeModel;
 public enum StrikeSelector
 {
 	;
-	
-	private static final Minecraft MC = WurstClient.MC;
 	
 	/** Kept between the predicted fall distance and the smash threshold. */
 	private static final double FALL_SAFETY = 0.1;
@@ -67,23 +64,24 @@ public enum StrikeSelector
 	
 	public static Decision decide(LivingEntity target)
 	{
-		if(Loadout.mace() < 0)
+		Engagement e = Engagement.now(target);
+		Kit kit = e.state().self().kit();
+		if(kit.mace() < 0)
 			return none("no mace");
 		
-		Engagement e = Engagement.now(target);
 		if(e.landing() == 0)
 			return none("on the ground");
 		
 		if(e.shieldFacingUs(0))
 		{
-			if(Loadout.axe() < 0)
+			if(kit.axe() < 0)
 				return none("shield raised and no axe");
 			return new Decision(Kind.STUNSLAM, new StunSlam(target), null,
 				"shield raised toward us");
 		}
 		
 		StrikeOption spear = plan(e, PreItem.SPEAR);
-		boolean above = e.eye(0).y > target.getEyeY();
+		boolean above = e.eye(0).y > e.state().target().eyePos().y;
 		if(above)
 		{
 			if(spear != null && spear.charged())
@@ -111,7 +109,7 @@ public enum StrikeSelector
 			return strike(Kind.SPEARMACE, target, spear,
 				"below the target, but the spear reaches");
 		
-		if(Hotbar.lungeSpear() >= 0 && Hotbar.hand() >= 0)
+		if(kit.lungeSpear() >= 0 && kit.hand() >= 0)
 			return new Decision(Kind.ESCAPE_LUNGE, new EscapeLunge(target),
 				null, "below the target and out of reach");
 		
@@ -141,15 +139,17 @@ public enum StrikeSelector
 	 */
 	public static StrikeOption plan(Engagement e, PreItem pre)
 	{
-		int slot = Loadout.slotFor(pre);
-		int maceSlot = Loadout.mace();
+		SelfState self = e.state().self();
+		Kit kit = self.kit();
+		int slot = kit.slotFor(pre);
+		int maceSlot = kit.mace();
 		if(slot < 0 || maceSlot < 0)
 			return null;
 		
-		ItemStack stack = Hotbar.get(slot);
-		ItemStack mace = Hotbar.get(maceSlot);
-		double delay = Loadout.attackDelay(stack);
-		boolean held = Hotbar.selected() == slot;
+		ItemStack stack = kit.get(slot);
+		ItemStack mace = kit.get(maceSlot);
+		double delay = kit.attackDelay(stack);
+		boolean held = kit.selected() == slot;
 		
 		// the switch happens in the next tick's handleKeybinds(), and that
 		// tick's player tick resets the charge after the update has run
@@ -163,7 +163,7 @@ public enum StrikeSelector
 				continue;
 			
 			// the attack charge in this update, before this tick's increment
-			double ticker = held ? MC.player.attackStrengthTicker + k : k - 2;
+			double ticker = held ? self.attackStrengthTicker() + k : k - 2;
 			boolean charged =
 				StrikeModel.isFull(StrikeModel.strength(ticker, delay));
 			boolean lastChance = !e.inReach(stack, i + 1);
@@ -172,11 +172,11 @@ public enum StrikeSelector
 			
 			// the hit lands after this tick's increment
 			double strength = StrikeModel.strength(ticker + 1, delay);
-			boolean crit = StrikeModel.isFull(strength)
-				&& !MC.player.isSprinting() && e.fall(i) > 0;
+			boolean crit = StrikeModel.isFull(strength) && !self.sprinting()
+				&& e.fall(i) > 0;
 			double damage =
-				StrikeModel.damage(Loadout.attackDamage(stack), strength,
-					e.fall(i), Loadout.level(mace, Enchantments.DENSITY), crit);
+				StrikeModel.damage(kit.attackDamage(stack), strength, e.fall(i),
+					Loadout.level(mace, Enchantments.DENSITY), crit);
 			return new StrikeOption(pre, slot, k, charged, crit, strength,
 				e.fall(i), damage, e.distance(i));
 		}
