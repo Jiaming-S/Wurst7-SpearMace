@@ -20,6 +20,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldBuilder;
+import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.server.MinecraftServer;
@@ -85,6 +86,8 @@ import net.wurstclient.util.Rotation;
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
+ * SpearMacePreview is enabled, so the predictions can be watched while the
+ * tests run, and the combat scenarios are shown in third person.
  */
 public final class SpearMaceTest implements FabricClientGameTest
 {
@@ -159,6 +162,11 @@ public final class SpearMaceTest implements FabricClientGameTest
 			context.waitTicks(2);
 			spContext.getConnection().waitForChunksRender();
 			
+			// draw the forward model in every scenario
+			context.runOnClient(
+				mc -> WurstClient.INSTANCE.getHax().spearMacePreviewHack
+					.setEnabled(true));
+			
 			testStateCapture(context, server, failures);
 			testPreview(context, server);
 			
@@ -175,8 +183,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 				testInfeasibleCatch(context, server, failures);
 			}
 			
+			// watch the combat scenarios from behind
 			if(runs("combat"))
+			{
+				setCamera(context, CameraType.THIRD_PERSON_BACK);
 				runCombatTests(context, server, failures);
+				setCamera(context, CameraType.FIRST_PERSON);
+			}
 		}
 		
 		for(NamedReport r : replays)
@@ -305,8 +318,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 	}
 	
 	/**
-	 * Takes screenshots of SpearMacePreview while falling toward a target
-	 * and while a pearl flies, for checking the drawing by eye.
+	 * Takes screenshots of SpearMacePreview, which stays enabled for all
+	 * scenarios, while falling toward a target and while a pearl flies.
 	 */
 	private void testPreview(ClientGameTestContext context,
 		TestServerContext server)
@@ -317,24 +330,17 @@ public final class SpearMaceTest implements FabricClientGameTest
 			+ (TARGET_Z - 8) + " 0 65");
 		context.waitFor(
 			mc -> !mc.player.onGround() && clientEntity(golem) != null);
-		context.runOnClient(
-			mc -> WurstClient.INSTANCE.getHax().spearMacePreviewHack
-				.setEnabled(true));
 		context.waitTicks(4);
 		context.takeScreenshot("spearmace_preview_fall");
 		
 		reset(context, server);
 		context.runOnClient(mc -> {
-			WurstClient.INSTANCE.getHax().spearMacePreviewHack.setEnabled(true);
 			KeyInput.look(new Rotation(0, -30));
 			KeyInput.selectSlot(3);
 			KeyInput.clickUse();
 		});
 		context.waitTicks(8);
 		context.takeScreenshot("spearmace_preview_pearl");
-		context.runOnClient(
-			mc -> WurstClient.INSTANCE.getHax().spearMacePreviewHack
-				.setEnabled(false));
 	}
 	
 	private static void check(List<String> failures, String name, String what,
@@ -1160,6 +1166,12 @@ public final class SpearMaceTest implements FabricClientGameTest
 		
 		// wait out the pearl cooldown and let the player settle
 		context.waitTicks(25);
+	}
+	
+	private static void setCamera(ClientGameTestContext context,
+		CameraType type)
+	{
+		context.runOnClient(mc -> mc.options.setCameraType(type));
 	}
 	
 	private static void releaseKeys(ClientGameTestContext context)

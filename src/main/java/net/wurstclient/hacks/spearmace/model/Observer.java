@@ -43,6 +43,13 @@ public enum Observer
 	;
 	
 	/**
+	 * The client shows a projectile within a few ticks of the server
+	 * spawning it. One that the prediction has for longer without the client
+	 * showing it was never really thrown, or was removed some other way.
+	 */
+	private static final int MAX_UNSEEN_AGE = 6;
+	
+	/**
 	 * @param predicted
 	 *            the model's state for now, or {@code null} to take the
 	 *            captured projectiles as they are
@@ -71,9 +78,19 @@ public enum Observer
 		return new GameState(self, target);
 	}
 	
+	/**
+	 * The predicted pending effects, with projectiles matched to the
+	 * client's view. Projectiles the client stopped showing are gone, as
+	 * the client shows removals later than the server makes them, and so
+	 * are projectiles it never showed although it should have by now.
+	 */
 	private static List<Pending> merge(List<Pending> predicted,
 		List<Pending> seen)
 	{
+		HashSet<Integer> seenIds = new HashSet<>();
+		for(Pending s : seen)
+			seenIds.add(entityId(s));
+		
 		HashSet<Integer> bound = new HashSet<>();
 		for(Pending p : predicted)
 			if(entityId(p) >= 0)
@@ -82,17 +99,21 @@ public enum Observer
 		ArrayList<Pending> merged = new ArrayList<>();
 		for(Pending p : predicted)
 		{
-			if(entityId(p) < 0)
+			int id = entityId(p);
+			if(id >= 0)
 			{
-				Pending sighting = firstSighting(p, seen, bound);
-				if(sighting != null)
-				{
-					bound.add(entityId(sighting));
-					merged.add(sighting);
-					continue;
-				}
+				if(seenIds.contains(id))
+					merged.add(p);
+				continue;
 			}
-			merged.add(p);
+			
+			Pending sighting = firstSighting(p, seen, bound);
+			if(sighting != null)
+			{
+				bound.add(entityId(sighting));
+				merged.add(sighting);
+			}else if(!isProjectile(p) || age(p) <= MAX_UNSEEN_AGE)
+				merged.add(p);
 		}
 		return merged;
 	}
@@ -200,6 +221,21 @@ public enum Observer
 	{
 		double size = change.length();
 		return size > 0.1 && residual.subtract(change).length() < size / 2;
+	}
+	
+	private static boolean isProjectile(Pending p)
+	{
+		return p instanceof PearlInFlight || p instanceof WindChargeInFlight;
+	}
+	
+	private static int age(Pending p)
+	{
+		return switch(p)
+		{
+			case PearlInFlight pearl -> pearl.age();
+			case WindChargeInFlight charge -> charge.age();
+			default -> 0;
+		};
 	}
 	
 	private static int entityId(Pending p)
