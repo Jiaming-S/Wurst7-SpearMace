@@ -28,10 +28,18 @@ import net.wurstclient.util.Rotation;
  *            {@code null} to keep the current yaw
  * @param pitch
  *            90 throws straight down
+ * @param forward
+ *            whether to sprint forward through the throw and the launch,
+ *            which carries the run-up into the air
  */
-public record WindChargeJump(Float yaw, float pitch, boolean jumpFirst)
-	implements Action
+public record WindChargeJump(Float yaw, float pitch, boolean jumpFirst,
+	boolean forward) implements Action
 {
+	public WindChargeJump(Float yaw, float pitch, boolean jumpFirst)
+	{
+		this(yaw, pitch, jumpFirst, false);
+	}
+	
 	/** How long a charge may fly before the launch counts as failed. */
 	private static final int MAX_FLIGHT = 12;
 	
@@ -45,11 +53,20 @@ public record WindChargeJump(Float yaw, float pitch, boolean jumpFirst)
 		return new WindChargeJump(null, 90, jumpFirst);
 	}
 	
+	/**
+	 * A sprint-jump toward {@code yaw} with the charge straight down,
+	 * holding forward until the apex.
+	 */
+	public static WindChargeJump forward(float yaw)
+	{
+		return new WindChargeJump(yaw, 90, true, true);
+	}
+	
 	@Override
 	public String name()
 	{
-		return String.format("WindChargeJump(pitch=%.1f, jump=%s)", pitch,
-			jumpFirst);
+		return String.format("WindChargeJump(pitch=%.1f, jump=%s%s)", pitch,
+			jumpFirst, forward ? ", forward" : "");
 	}
 	
 	@Override
@@ -65,22 +82,24 @@ public record WindChargeJump(Float yaw, float pitch, boolean jumpFirst)
 		TickInput input =
 			TickInput.NONE.withRotation(aim).withSlot(slot).withUse();
 		Flying flying =
-			new Flying(name(), self.kit().selected(), jump, 1, self);
-		return jump ? Step.run(input.withJump(), flying).holding(Channel.JUMP)
-			: Step.run(input, flying);
+			new Flying(name(), self.kit().selected(), jump, 1, self, forward);
+		Run run =
+			jump ? Step.run(input.withJump(), flying).holding(Channel.JUMP)
+				: Step.run(input, flying);
+		return forward ? run.moving(true) : run;
 	}
 	
 	/** Waiting for the charge to explode. */
 	private record Flying(String name, int restoreSlot, boolean releaseJump,
-		int ticks, SelfState last) implements Action
+		int ticks, SelfState last, boolean forward) implements Action
 	{
 		@Override
 		public Step next(Level level, GameState s)
 		{
 			SelfState self = s.self();
 			Vec3 burst = PlayerSim.push(level, last, self);
-			Action then = burst.y > 0.2 ? new Rising(name, burst)
-				: new Flying(name, -1, false, ticks + 1, self);
+			Action then = burst.y > 0.2 ? new Rising(name, burst, forward)
+				: new Flying(name, -1, false, ticks + 1, self, forward);
 			if(then instanceof Flying && ticks > MAX_FLIGHT + 2)
 				return Step.fail("no explosion");
 			
@@ -89,12 +108,13 @@ public record WindChargeJump(Float yaw, float pitch, boolean jumpFirst)
 				run = run.holding(Channel.JUMP);
 			if(restoreSlot >= 0 && restoreSlot != self.kit().selected())
 				run = run.withSlot(restoreSlot);
-			return run;
+			return forward ? run.moving(true) : run;
 		}
 	}
 	
 	/** Going up until the apex. */
-	private record Rising(String name, Vec3 burst) implements Action
+	private record Rising(String name, Vec3 burst, boolean forward)
+		implements Action
 	{
 		@Override
 		public Step next(Level level, GameState s)
@@ -103,7 +123,8 @@ public record WindChargeJump(Float yaw, float pitch, boolean jumpFirst)
 			// velocity
 			if(s.self().vel().y <= 0)
 				return Step.done(new Launched(burst));
-			return Step.idle(this);
+			Run run = Step.idle(this);
+			return forward ? run.moving(true) : run;
 		}
 	}
 }

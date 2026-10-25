@@ -7,16 +7,19 @@
  */
 package net.wurstclient.hacks.spearmace.plan.eval;
 
+import net.minecraft.world.phys.Vec3;
 import net.wurstclient.hacks.spearmace.model.Event;
 import net.wurstclient.hacks.spearmace.plan.Evaluator;
 import net.wurstclient.hacks.spearmace.plan.Outcome;
 import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.state.Pending.Teleport;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
  * Expected damage dealt, minus what it cost: fall damage, items and time.
  * A state is worth the height the next smash can use, a wind charge to
- * launch again with, and being close enough to strike.
+ * launch again with, and being close enough to strike. A pending pearl
+ * teleport counts as already being there.
  */
 public final class DamageRace implements Evaluator
 {
@@ -50,11 +53,16 @@ public final class DamageRace implements Evaluator
 			return 0;
 		
 		SelfState self = s.self();
-		double height = self.pos().y - s.target().eyePos().y;
+		Vec3 pos = self.pos();
+		for(Teleport t : self.pending(Teleport.class))
+			if(!t.applied())
+				pos = t.to();
+			
+		double height = pos.y - s.target().eyePos().y;
 		double value = w.height() * Math.clamp(height, 0, w.maxHeight());
 		if(self.kit().windCharge() >= 0)
 			value += w.ready();
-		double gap = self.pos().subtract(s.target().pos()).horizontalDistance();
+		double gap = pos.subtract(s.target().pos()).horizontalDistance();
 		return value - w.distance() * Math.max(0, gap - STRIKE_RANGE);
 	}
 }

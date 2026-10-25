@@ -97,6 +97,8 @@ import net.wurstclient.util.Rotation;
  * </pre>
  *
  * Set it to {@code movement} or {@code combat} to run only that group.
+ * The far-away target scenarios are harder and only run when it is set to
+ * {@code hard} (or {@code all} for everything).
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
@@ -116,6 +118,12 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private static final double TARGET_X = 0.5;
 	private static final double TARGET_Z = 6.5;
 	private static final double TARGET_HEALTH = 1000;
+	
+	/** Where the far-away targets start, straight ahead. */
+	private static final double FAR_Z = 40.5;
+	private static final double FAR_SPEED = 0.1;
+	private static final int FAR_TICKS = 600;
+	private static final int BOUNCE_COOLDOWN = 10;
 	
 	private static final Rotation UP = new Rotation(0, -90);
 	private static final Rotation DIAGONAL = new Rotation(0, -30);
@@ -141,10 +149,16 @@ public final class SpearMaceTest implements FabricClientGameTest
 		return System.getenv("WURST_SPEARMACE_TEST") != null;
 	}
 	
+	/**
+	 * The {@code hard} group only runs when asked for by name or with
+	 * {@code all}, the other groups also run for any other value.
+	 */
 	private static boolean runs(String group)
 	{
 		String value = System.getenv("WURST_SPEARMACE_TEST");
-		return !"movement".equals(value) && !"combat".equals(value)
+		if(group.equals("hard"))
+			return "hard".equals(value) || "all".equals(value);
+		return !List.of("movement", "combat", "hard").contains(value)
 			|| group.equals(value);
 	}
 	
@@ -203,6 +217,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 			{
 				setCamera(context, CameraType.THIRD_PERSON_BACK);
 				runCombatTests(context, server, failures);
+				setCamera(context, CameraType.FIRST_PERSON);
+			}
+			
+			if(runs("hard"))
+			{
+				setCamera(context, CameraType.THIRD_PERSON_BACK);
+				runHardTests(context, server, failures);
 				setCamera(context, CameraType.FIRST_PERSON);
 			}
 		}
@@ -982,6 +1003,150 @@ public final class SpearMaceTest implements FabricClientGameTest
 		LOGGER.info("SM: search comparison {}", summary);
 	}
 	
+	private void runHardTests(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		testFarTarget(context, server, failures);
+		testFarBouncingTarget(context, server, failures);
+		testFarMovingTarget(context, server, failures, "left",
+			new Vec3(FAR_SPEED, 0, 0));
+		testFarMovingTarget(context, server, failures, "forward",
+			new Vec3(0, 0, FAR_SPEED));
+		testFarMovingTarget(context, server, failures, "backward",
+			new Vec3(0, 0, -FAR_SPEED));
+	}
+	
+	/**
+	 * A target too far away for any single movement technique, so the
+	 * planner has to chain at least two different ones before it strikes.
+	 */
+	private void testFarTarget(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Far target";
+		reset(context, server);
+		spawnGolem(server, TARGET_X, GROUND_Y, FAR_Z, true);
+		List<Entry> history = runFar(context, name, failures, mc -> {});
+		
+		List<String> kinds = movesBeforeFirstStrike(history).stream()
+			.map(e -> e.name().replaceAll("\\(.*", "")).distinct().toList();
+		LOGGER.info("SM: {} moved with {}", name, kinds);
+		if(kinds.size() < 2)
+			failures.add(name + ": chained only " + kinds
+				+ " before the strike: " + history);
+	}
+	
+	/**
+	 * A far target that keeps launching itself with wind charges at its
+	 * feet whenever it lands.
+	 */
+	private void testFarBouncingTarget(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Far bouncing target";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, FAR_Z, false);
+		standStill(server, golem);
+		
+		int[] cooldown = {0};
+		double[] top = {GROUND_Y};
+		runFar(context, name, failures, mc -> {
+			if(!(mc.overworld().getEntity(golem) instanceof LivingEntity g))
+				return;
+			top[0] = Math.max(top[0], g.getY());
+			if(cooldown[0] > 0)
+				cooldown[0]--;
+			else if(g.onGround())
+			{
+				WindCharge charge = EntityTypes.WIND_CHARGE
+					.create(mc.overworld(), EntitySpawnReason.COMMAND);
+				charge.snapTo(g.getX(), g.getY() + 0.5, g.getZ(), 0, 0);
+				charge.setDeltaMovement(0, -1, 0);
+				mc.overworld().addFreshEntity(charge);
+				cooldown[0] = BOUNCE_COOLDOWN;
+			}
+		});
+		
+		LOGGER.info("SM: {} target bounced up to {} blocks", name,
+			fmt(top[0] - GROUND_Y));
+		if(top[0] - GROUND_Y < 1)
+			failures.add(name + ": the target never bounced (setup)");
+	}
+	
+	/**
+	 * A far target walking at a steady speed: to the left, away from the
+	 * player or toward the player.
+	 */
+	private void testFarMovingTarget(ClientGameTestContext context,
+		TestServerContext server, List<String> failures, String direction,
+		Vec3 velocity)
+	{
+		String name = "Far target moving " + direction;
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, FAR_Z, false);
+		standStill(server, golem);
+		
+		runFar(context, name, failures, mc -> {
+			if(mc.overworld().getEntity(golem) instanceof LivingEntity g)
+				g.setDeltaMovement(velocity.x, g.getDeltaMovement().y,
+					velocity.z);
+		});
+	}
+	
+	/**
+	 * Lets the beam search planner go after the far target until its
+	 * first strike lands, and fails if it never does.
+	 */
+	private List<Entry> runFar(ClientGameTestContext context, String name,
+		List<String> failures, Consumer<MinecraftServer> serverTick)
+	{
+		context.waitFor(mc -> clientEntity(targetId) != null);
+		context.waitTicks(2);
+		
+		Planner planner = newPlanner(new BeamSearch(4, 3), 50);
+		List<Entry> history = runPlanner(context, name, FAR_TICKS, planner,
+			h -> h.stream().anyMatch(SpearMaceTest::isStrike), serverTick);
+		
+		Entry strike = history.stream().filter(SpearMaceTest::isStrike)
+			.findFirst().orElse(null);
+		LOGGER.info("SM: {} first strike {}, replan={}ms, moves {}", name,
+			strike, fmt(planner.meanMillis()), movesBeforeFirstStrike(history));
+		if(strike == null)
+			failures.add(
+				name + ": never struck in " + FAR_TICKS + " ticks: " + history);
+		return history;
+	}
+	
+	private static boolean isStrike(Entry e)
+	{
+		return e.payload(Struck.class) != null
+			|| e.payload(Slammed.class) != null;
+	}
+	
+	/** Movement actions that did something, up to the first strike. */
+	private static List<Entry> movesBeforeFirstStrike(List<Entry> history)
+	{
+		ArrayList<Entry> moves = new ArrayList<>();
+		for(Entry e : history)
+		{
+			if(isStrike(e))
+				break;
+			boolean movement = e.name().startsWith("PearlCatch")
+				|| e.name().startsWith("SpearLunge")
+				|| e.name().startsWith("WindChargeJump");
+			if(movement && e.status() != Runner.Status.FAILED)
+				moves.add(e);
+		}
+		return moves;
+	}
+	
+	/** Keeps a golem with AI from walking off on its own. */
+	private static void standStill(TestServerContext server, int id)
+	{
+		server.runOnServer(mc -> ((LivingEntity)mc.overworld().getEntity(id))
+			.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0));
+	}
+	
 	private static Planner newPlanner(Search search, long budgetMillis)
 	{
 		return new Planner(TargetModel.ballistic(), new Options(),
@@ -994,6 +1159,17 @@ public final class SpearMaceTest implements FabricClientGameTest
 	 */
 	private List<Entry> runPlanner(ClientGameTestContext context, String name,
 		int maxTicks, Planner planner, Predicate<List<Entry>> done)
+	{
+		return runPlanner(context, name, maxTicks, planner, done, mc -> {});
+	}
+	
+	/**
+	 * @param serverTick
+	 *            runs on the server once per tick, to move the target
+	 */
+	private List<Entry> runPlanner(ClientGameTestContext context, String name,
+		int maxTicks, Planner planner, Predicate<List<Entry>> done,
+		Consumer<MinecraftServer> serverTick)
 	{
 		Recorder recorder =
 			new Recorder(() -> targetId >= 0 ? clientEntity(targetId) : null);
@@ -1009,6 +1185,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		{
 			context.waitTick();
 			int t = tick;
+			server.runOnServer(serverTick::accept);
 			logServerProjectiles(name, t);
 			boolean finished = context.computeOnClient(mc -> {
 				LOGGER.info(String.format(

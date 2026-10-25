@@ -17,7 +17,7 @@ public interface TargetModel
 {
 	public TargetState step(Level level, TargetState target);
 	
-	/** Keeps its velocity and falls, see {@link TargetSim}. */
+	/** Keeps walking or falls, see {@link TargetSim}. */
 	public static TargetModel ballistic()
 	{
 		return (level, target) -> {

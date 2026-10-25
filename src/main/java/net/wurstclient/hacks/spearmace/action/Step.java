@@ -53,6 +53,15 @@ public sealed interface Step
 				.holding(Channel.HOTBAR);
 		}
 		
+		/** Holds (or releases) the forward and sprint keys. */
+		public Run moving(boolean forward)
+		{
+			TickInput moved = new TickInput(input.rotation(), forward, forward,
+				input.jump(), input.slot(), input.attack(), input.use());
+			return new Run(moved, claims, committed, then)
+				.holding(Channel.MOVE);
+		}
+		
 		/** Also looks this way. */
 		public Run withRotation(Rotation rotation)
 		{

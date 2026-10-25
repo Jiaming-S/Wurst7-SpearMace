@@ -21,8 +21,9 @@ import net.wurstclient.hacks.spearmace.state.TargetState;
 
 /**
  * Rough model of another entity's motion as the client sees it: it keeps
- * its velocity and falls like a player when airborne. One {@link #step()}
- * is one client tick.
+ * its velocity and falls like a player when airborne. On the ground it keeps
+ * walking the way it walks, so a target that was knocked back is expected
+ * to keep sliding. One {@link #step()} is one client tick.
  *
  * <p>
  * The client shows other entities a few ticks late, interpolating toward
@@ -79,8 +80,7 @@ public final class TargetSim
 		vel = new Vec3(move.x != vel.x ? 0 : vel.x, collidedY ? 0 : vel.y,
 			move.z != vel.z ? 0 : vel.z);
 		
-		double friction =
-			onGround ? 0.6 * PlayerSim.AIR_FRICTION : PlayerSim.AIR_FRICTION;
+		double friction = onGround ? 1 : PlayerSim.AIR_FRICTION;
 		vel = new Vec3(vel.x * friction,
 			(vel.y - PlayerSim.GRAVITY) * PlayerSim.VERTICAL_DRAG,
 			vel.z * friction);

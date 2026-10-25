@@ -20,28 +20,43 @@ import net.wurstclient.hacks.spearmace.combat.MaceStrike;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Decision;
 import net.wurstclient.hacks.spearmace.combat.StunSlam;
+import net.wurstclient.hacks.spearmace.maneuver.Drift;
+import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
+import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
 import net.wurstclient.hacks.spearmace.maneuver.WindChargeJump;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.SelfState;
+import net.wurstclient.util.Rotation;
 
 /**
  * The actions worth trying from a state, in the order the rules prefer
  * them:
  * <ul>
+ * <li>far from the target: pearl catches toward it, a lunge toward it,
+ * or a launch for height, running forward or straight up</li>
+ * <li>in the air: drift toward the target</li>
  * <li>rising: wait for the apex</li>
  * <li>on the ground near the target: launch with a wind charge</li>
- * <li>falling: {@link StrikeSelector}'s pick, then the other strikes</li>
+ * <li>falling near the target: {@link StrikeSelector}'s pick, then the
+ * other strikes</li>
  * </ul>
  * Every list ends with a {@link Hold}, which always works.
  */
 public final class Options
 {
-	/** Launches only when the target is this close, horizontally. */
+	/**
+	 * Closer than this horizontally, the target is struck from above;
+	 * further away, it has to be approached first.
+	 */
 	private static final double LAUNCH_RANGE = 8;
 	
 	/** Faster than gravity leaves a player standing still. */
 	private static final double RISING = 0.1;
+	
+	/** Diagonal for distance, steep for height. */
+	private static final float[] CATCH_PITCHES = {-30, -45};
+	private static final int CATCH_DELAY = 3;
 	
 	private static final int HOLD = 10;
 	private static final int HOLD_RISING = 40;
@@ -50,23 +65,62 @@ public final class Options
 	{
 		ArrayList<Action> actions = new ArrayList<>();
 		SelfState self = s.self();
+		boolean far = s.targetAlive() && horizontalDistance(s) > LAUNCH_RANGE;
 		if(!s.targetAlive())
 			actions.add(new Hold("no target", HOLD));
 		else if(self.vel().y > RISING)
-			// right after a launch the player is still on the ground
-			actions.add(new Hold("rising", HOLD_RISING));
-		else if(self.onGround())
 		{
-			if(self.kit().windCharge() >= 0
-				&& horizontalDistance(s) <= LAUNCH_RANGE)
+			// right after a launch the player is still on the ground
+			// near the target, the rules wait for the apex
+			if(far)
+				addApproach(s, actions, false);
+			Hold hold = new Hold("rising", HOLD_RISING);
+			Drift drift = new Drift(HOLD_RISING);
+			actions.addAll(far ? List.of(drift, hold) : List.of(hold, drift));
+		}else if(self.onGround())
+		{
+			if(far)
+				addApproach(s, actions, true);
+			else if(self.kit().windCharge() >= 0)
 				actions.add(WindChargeJump.atFeet(false));
 			actions.add(new Hold("on the ground", HOLD));
 		}else
 		{
-			addStrikes(level, s, actions);
+			if(far)
+				addApproach(s, actions, true);
+			else
+				addStrikes(level, s, actions);
+			actions.add(new Drift(HOLD));
 			actions.add(new Hold("falling", HOLD));
 		}
 		return actions;
+	}
+	
+	/**
+	 * Ways to get closer: pearl catches toward the target, a flat lunge
+	 * toward it, and a launch for height that later moves can use.
+	 */
+	private static void addApproach(GameState s, List<Action> actions,
+		boolean pearls)
+	{
+		Kit kit = s.self().kit();
+		float yaw = towardYaw(s);
+		if(pearls && kit.enderPearl() >= 0 && kit.windCharge() >= 0)
+			for(float pitch : CATCH_PITCHES)
+				actions
+					.add(new PearlCatch(new Rotation(yaw, pitch), CATCH_DELAY));
+		if(kit.lungeSpear() >= 0 && kit.hand() >= 0)
+			actions.add(new SpearLunge(yaw, 0));
+		if(s.self().onGround() && kit.windCharge() >= 0)
+		{
+			actions.add(WindChargeJump.forward(yaw));
+			actions.add(WindChargeJump.atFeet(false));
+		}
+	}
+	
+	private static float towardYaw(GameState s)
+	{
+		return Engagement.aim(s.self().eyePos(), s.target().eyePos()).yaw();
 	}
 	
 	private static void addStrikes(Level level, GameState s,

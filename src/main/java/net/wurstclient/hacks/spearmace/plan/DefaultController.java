@@ -17,9 +17,10 @@ import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
- * What to do with the channels no action claims: look at the target, and
- * while in the air hold the longest-charging pre-item, so that the next
- * strike is charged by the time it starts.
+ * What to do with the channels no action claims: look at the target,
+ * release the movement keys, and while in the air hold the
+ * longest-charging pre-item, so that the next strike is charged by the
+ * time it starts.
  */
 public final class DefaultController implements Controller
 {
@@ -27,7 +28,12 @@ public final class DefaultController implements Controller
 	public Run fill(GameState s, Run run)
 	{
 		if(!s.targetAlive())
-			return run;
+			return run.claims().contains(Channel.MOVE) ? run
+				: run.moving(false);
+		
+		// actions that move hold the keys, nothing else should
+		if(!run.claims().contains(Channel.MOVE))
+			run = run.moving(false);
 		
 		SelfState self = s.self();
 		if(!run.claims().contains(Channel.AIM))

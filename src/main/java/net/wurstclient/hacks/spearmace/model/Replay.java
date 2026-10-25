@@ -43,7 +43,9 @@ public enum Replay
 	 * @param timing
 	 *            whether the error is explained by something the model
 	 *            expected arriving a tick early, late or never, which
-	 *            depends on server timing that the client can't know
+	 *            depends on server timing that the client can't know, or
+	 *            by a pearl teleporting somewhere else because of random
+	 *            projectile spread
 	 */
 	public record StepError(int index, double pos, double vel, boolean slot,
 		int ticker, double fall, int windChargeCooldown, int pearlCooldown,
@@ -182,6 +184,7 @@ public enum Replay
 		boolean timing = velocityTiming(window, p.vel().subtract(a.vel()))
 			|| teleportTiming(window, p.pos(), a.pos())
 			|| damageTiming(window, targetHealth)
+			|| missedCatch(from.self(), p, a)
 			|| windCharge != 0 && cooldownEnding(from, p, Items.WIND_CHARGE)
 			|| pearl != 0 && cooldownEnding(from, p, Items.ENDER_PEARL);
 		
@@ -218,6 +221,20 @@ public enum Replay
 				.distanceTo(t.to()) < 0.5) != (actual.distanceTo(t.to()) < 0.5))
 				return true;
 		return false;
+	}
+	
+	/**
+	 * A teleport on one side that the other doesn't have or has somewhere
+	 * else: a pearl that random spread made miss its wind charge, or catch
+	 * one it should have missed.
+	 */
+	private static boolean missedCatch(SelfState from, SelfState predicted,
+		SelfState actual)
+	{
+		Vec3 moved = from.pos().add(from.vel());
+		boolean jumped = predicted.pos().distanceTo(moved) > 2
+			|| actual.pos().distanceTo(moved) > 2;
+		return jumped && predicted.pos().distanceTo(actual.pos()) > 1;
 	}
 	
 	/** Damage that only one side shows yet. */
