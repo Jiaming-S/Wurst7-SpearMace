@@ -17,6 +17,7 @@ accessible	method	net/minecraft/world/entity/animal/frog/Tadpole	setAgeLocked	(Z
 accessible	method	net/minecraft/world/entity/player/Player	canGlide	()Z
 accessible	method	net/minecraft/world/entity/projectile/FishingHook	calculateOpenWater	(Lnet/minecraft/core/BlockPos;)Z
 accessible	field	net/minecraft/client/ClientClockManager	clocks	Ljava/util/Map;
+accessible	field	net/minecraft/client/Minecraft	missTime	I
 accessible	field	net/minecraft/client/Minecraft	rightClickDelay	I
 accessible	field	net/minecraft/client/gui/GuiGraphicsExtractor	guiRenderState	Lnet/minecraft/client/renderer/state/gui/GuiRenderState;
 accessible	field	net/minecraft/client/gui/GuiGraphicsExtractor	scissorStack	Lnet/minecraft/client/gui/GuiGraphicsExtractor$ScissorStack;
@@ -40,8 +41,10 @@ accessible	field	net/minecraft/client/player/LocalPlayer	xRotLast	F
 accessible	field	net/minecraft/client/player/LocalPlayer	yRotLast	F
 accessible	field	net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket	sectionPos	Lnet/minecraft/core/SectionPos;
 accessible	field	net/minecraft/world/entity/Entity	stuckSpeedMultiplier	Lnet/minecraft/world/phys/Vec3;
+accessible	field	net/minecraft/world/entity/LivingEntity	attackStrengthTicker	I
 accessible	field	net/minecraft/world/entity/LivingEntity	equipment	Lnet/minecraft/world/entity/EntityEquipment;
 accessible	field	net/minecraft/world/entity/LivingEntity	jumping	Z
+accessible	field	net/minecraft/world/entity/LivingEntity	useItemRemaining	I
 accessible	field	net/minecraft/world/entity/Mob	DATA_MOB_FLAGS_ID	Lnet/minecraft/network/syncher/EntityDataAccessor;
 accessible	field	net/minecraft/world/entity/animal/goat/Goat	isLoweringHead	Z
 accessible	field	net/minecraft/world/entity/monster/zombie/ZombifiedPiglin	SPEED_MODIFIER_ATTACKING_ID	Lnet/minecraft/resources/Identifier;
