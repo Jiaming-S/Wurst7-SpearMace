@@ -41,7 +41,7 @@ public final class Runner implements UpdateListener
 	private static final Minecraft MC = WurstClient.MC;
 	
 	private final Supplier<LivingEntity> target;
-	private final Planner planner;
+	private Planner planner;
 	private final Tracker tracker = new Tracker();
 	private final ArrayList<Entry> history = new ArrayList<>();
 	
@@ -56,6 +56,12 @@ public final class Runner implements UpdateListener
 	public Runner(Supplier<LivingEntity> target, Planner planner)
 	{
 		this.target = target;
+		this.planner = planner;
+	}
+	
+	/** Uses {@code planner} from the next replan on. */
+	public void setPlanner(Planner planner)
+	{
 		this.planner = planner;
 	}
 	

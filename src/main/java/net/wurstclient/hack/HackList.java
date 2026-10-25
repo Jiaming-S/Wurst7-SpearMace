@@ -170,6 +170,7 @@ public final class HackList implements UpdateListener
 	public final SkinDerpHack skinDerpHack = new SkinDerpHack();
 	public final SneakHack sneakHack = new SneakHack();
 	public final SnowShoeHack snowShoeHack = new SnowShoeHack();
+	public final SpearMaceHack spearMaceHack = new SpearMaceHack();
 	public final SpearMacePreviewHack spearMacePreviewHack =
 		new SpearMacePreviewHack();
 	public final SpeedHackHack speedHackHack = new SpeedHackHack();

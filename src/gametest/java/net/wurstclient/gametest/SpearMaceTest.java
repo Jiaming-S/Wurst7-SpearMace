@@ -40,6 +40,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.SpearMaceHack;
 import net.wurstclient.hacks.spearmace.action.ActionRunner;
 import net.wurstclient.hacks.spearmace.action.ActionRunner.Result;
 import net.wurstclient.hacks.spearmace.action.ActionRunner.StartCondition;
@@ -702,6 +703,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		testCombatChain(context, server, failures);
 		testPlannerChain(context, server, failures);
 		testSearchComparison(context, server, failures);
+		testHack(context, server, failures);
 	}
 	
 	private void testStrikeFromAbove(ClientGameTestContext context,
@@ -957,6 +959,57 @@ public final class SpearMaceTest implements FabricClientGameTest
 		if(Math.abs(damage - predicted) > Math.max(1.5, 0.05 * predicted))
 			failures.add(name + ": dealt " + fmt(damage) + " damage, predicted "
 				+ fmt(predicted));
+	}
+	
+	/**
+	 * The SpearMace hack itself, with its default settings: it has to find
+	 * the golem on its own, strike it twice and let go of every key when
+	 * turned off.
+	 */
+	private void testHack(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "SpearMace hack";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		SpearMaceHack hack = WurstClient.INSTANCE.getHax().spearMaceHack;
+		context.runOnClient(mc -> hack.setEnabled(true));
+		boolean[] picked = {false};
+		List<Entry> history = List.of();
+		for(int t = 0; t < 300; t++)
+		{
+			context.waitTick();
+			logServerProjectiles(name, t);
+			history = context.computeOnClient(mc -> {
+				LivingEntity target = hack.getTarget();
+				picked[0] |= target != null && target.getId() == golem;
+				return hack.getRunner().history();
+			});
+			if(history.stream().filter(SpearMaceTest::isStrike).count() >= 2)
+				break;
+		}
+		context.runOnClient(mc -> hack.setEnabled(false));
+		context.waitTicks(2);
+		logServerProjectiles(name, 300);
+		
+		boolean[] keys = context
+			.computeOnClient(mc -> new boolean[]{mc.options.keyUp.isDown(),
+				mc.options.keySprint.isDown(), mc.options.keyJump.isDown()});
+		long strikes = history.stream().filter(SpearMaceTest::isStrike).count();
+		LOGGER.info("SM: {} picked golem={} strikes={} damage={} history {}",
+			name, picked[0], strikes, fmt(initialHealth - targetHealth),
+			history);
+		if(!picked[0])
+			failures.add(name + ": never targeted the golem");
+		if(strikes < 2)
+			failures.add(name + ": only " + strikes + " strikes: " + history);
+		if(keys[0] || keys[1] || keys[2])
+			failures.add(name + ": still holding keys after turning off");
 	}
 	
 	/**

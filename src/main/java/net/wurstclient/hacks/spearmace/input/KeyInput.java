@@ -110,6 +110,14 @@ public enum KeyInput
 			clickUse();
 	}
 	
+	/** Lets go of every key an action may have held. */
+	public static void releaseAll()
+	{
+		hold(MC.options.keyUp, false);
+		hold(MC.options.keySprint, false);
+		hold(MC.options.keyJump, false);
+	}
+	
 	private static void hold(KeyMapping key, boolean held)
 	{
 		if(held)
