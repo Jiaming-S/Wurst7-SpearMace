@@ -1,0 +1,979 @@
+/*
+ * Copyright (c) 2014-2026 Wurst-Imperium and contributors.
+ *
+ * This source code is subject to the terms of the GNU General Public
+ * License, version 3. If a copy of the GPL was not distributed with this
+ * file, You can obtain one at: https://www.gnu.org/licenses/gpl-3.0.txt
+ */
+package net.wurstclient.gametest;
+
+import static net.wurstclient.gametest.WurstClientTestHelper.*;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
+
+import org.slf4j.Logger;
+
+import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
+import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldBuilder;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.WindCharge;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.phys.Vec3;
+import net.wurstclient.hacks.spearmace.combat.Engage;
+import net.wurstclient.hacks.spearmace.combat.EscapeLunge;
+import net.wurstclient.hacks.spearmace.combat.Loadout;
+import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
+import net.wurstclient.hacks.spearmace.combat.MaceStrike;
+import net.wurstclient.hacks.spearmace.combat.StrikeOption;
+import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Kind;
+import net.wurstclient.hacks.spearmace.combat.StunSlam;
+import net.wurstclient.hacks.spearmace.input.KeyInput;
+import net.wurstclient.hacks.spearmace.maneuver.Maneuver.Status;
+import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner;
+import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner.Result;
+import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner.StartCondition;
+import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
+import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
+import net.wurstclient.hacks.spearmace.maneuver.WindChargeJump;
+import net.wurstclient.mixinterface.IKeyMapping;
+import net.wurstclient.util.Rotation;
+
+/**
+ * Scenario tests for the SpearMace movement maneuvers. Only runs when the
+ * {@code WURST_SPEARMACE_TEST} environment variable is set, in which case
+ * the regular {@link WurstTest} suite is skipped:
+ *
+ * <pre>
+ * WURST_SPEARMACE_TEST=1 ./gradlew runClientGameTestWithMods
+ * </pre>
+ *
+ * Set it to {@code movement} or {@code combat} to run only that group.
+ *
+ * Every tick of every scenario is logged with the predicted and actual
+ * state, so the logs double as calibration data for the forward models.
+ */
+public final class SpearMaceTest implements FabricClientGameTest
+{
+	private static final Logger LOGGER = WurstTest.LOGGER;
+	
+	/** Hotbar layout set up by {@link #reset}. */
+	private static final int HAND_SLOT = 0;
+	private static final int SPEAR_SLOT = 1;
+	
+	/** Where combat targets stand. */
+	private static final double GROUND_Y = -60;
+	private static final double TARGET_X = 0.5;
+	private static final double TARGET_Z = 6.5;
+	private static final double TARGET_HEALTH = 1000;
+	
+	private static final Rotation UP = new Rotation(0, -90);
+	private static final Rotation DIAGONAL = new Rotation(0, -30);
+	private static final Rotation STEEP_DIAGONAL = new Rotation(0, -45);
+	
+	private ManeuverRunner runner;
+	private TestServerContext server;
+	
+	/** The combat target whose server-side health gets logged, or -1. */
+	private int targetId = -1;
+	private double initialHealth;
+	private double targetHealth;
+	private ShieldDummy shieldDummy;
+	
+	public static boolean isEnabled()
+	{
+		return System.getenv("WURST_SPEARMACE_TEST") != null;
+	}
+	
+	private static boolean runs(String group)
+	{
+		String value = System.getenv("WURST_SPEARMACE_TEST");
+		return !"movement".equals(value) && !"combat".equals(value)
+			|| group.equals(value);
+	}
+	
+	@Override
+	public void runTest(ClientGameTestContext context)
+	{
+		if(!isEnabled())
+			return;
+		
+		hideSplashTexts(context);
+		waitForTitleScreenFade(context);
+		
+		TestWorldBuilder worldBuilder = context.worldBuilder();
+		worldBuilder.adjustSettings(creator -> {
+			creator.setName("SpearMace Test");
+			creator.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			creator.getGameRules().set(GameRules.SEND_COMMAND_FEEDBACK, false,
+				null);
+			WurstTest.applyFlatPresetWithSmoothStone(creator);
+		});
+		
+		ArrayList<String> failures = new ArrayList<>();
+		try(TestSingleplayerContext spContext = worldBuilder.create())
+		{
+			TestServerContext server = spContext.getServer();
+			this.server = server;
+			runCommand(server, "time set noon");
+			runCommand(server, "difficulty peaceful");
+			runCommand(server, "gamerule spawn_mobs false");
+			context.waitTicks(2);
+			spContext.getConnection().waitForChunksRender();
+			
+			if(runs("movement"))
+			{
+				testWindChargeStanding(context, server, failures, false);
+				testWindChargeStanding(context, server, failures, true);
+				testWindChargeMoving(context, server, failures);
+				testLungeAngles(context, server, failures);
+				testVerticalPearlCatch(context, server, failures);
+				testDiagonalCatchAfterWindCharge(context, server, failures);
+				testLungesWhileFalling(context, server, failures);
+				testChain(context, server, failures);
+				testInfeasibleCatch(context, server, failures);
+			}
+			
+			if(runs("combat"))
+				runCombatTests(context, server, failures);
+		}
+		
+		if(!failures.isEmpty())
+			throw new AssertionError(
+				"SpearMace tests failed:\n" + String.join("\n", failures));
+		
+		LOGGER.info("SpearMace tests passed");
+	}
+	
+	private void testWindChargeStanding(ClientGameTestContext context,
+		TestServerContext server, List<String> failures, boolean jump)
+	{
+		String name = "WindCharge standing" + (jump ? " + jump" : "");
+		reset(context, server);
+		
+		Vec3 start = playerPos(context);
+		List<Result> results =
+			run(context, name, 60, r -> r.enqueue(WindChargeJump.atFeet(jump)));
+		
+		Result r = single(results, name, failures);
+		if(r == null)
+			return;
+		
+		double predicted = r.prediction().endPos().y - start.y;
+		double actual = r.endPos().y - start.y;
+		LOGGER.info("SM: {} apex gain predicted={} actual={}", name,
+			fmt(predicted), fmt(actual));
+		if(actual < 2)
+			failures.add(name + ": barely launched, gain=" + fmt(actual));
+		if(Math.abs(actual - predicted) > 0.3)
+			failures.add(name + ": apex gain " + fmt(actual) + " vs predicted "
+				+ fmt(predicted));
+	}
+	
+	private void testWindChargeMoving(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "WindCharge sprinting";
+		reset(context, server);
+		
+		context.runOnClient(mc -> {
+			mc.options.keyUp.setDown(true);
+			mc.options.keySprint.setDown(true);
+		});
+		context.waitTicks(15);
+		
+		Vec3 start = playerPos(context);
+		List<Result> results = run(context, name, 60,
+			r -> r.enqueue(WindChargeJump.atFeet(false)));
+		releaseKeys(context);
+		
+		Result r = single(results, name, failures);
+		if(r == null)
+			return;
+		
+		Vec3 predicted = r.prediction().endPos();
+		Vec3 actual = r.endPos();
+		LOGGER.info("SM: {} start={} predicted={} actual={}", name, fmt(start),
+			fmt(predicted), fmt(actual));
+		if(actual.y - start.y < 2)
+			failures.add(name + ": barely launched");
+		if(Math.abs(actual.y - predicted.y) > 0.4)
+			failures.add(name + ": apex y " + fmt(actual.y) + " vs predicted "
+				+ fmt(predicted.y));
+		if(horizontalDist(actual, predicted) > 0.6)
+			failures.add(name + ": apex " + fmt(actual) + " vs predicted "
+				+ fmt(predicted));
+	}
+	
+	private void testLungeAngles(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		double lastDistance = Double.MAX_VALUE;
+		for(float pitch : new float[]{0, 30, 60})
+		{
+			String name = "Lunge pitch " + pitch;
+			reset(context, server);
+			
+			Vec3 start = playerPos(context);
+			SpearLunge lunge = new SpearLunge(0, pitch);
+			int[] spearTicks = {0};
+			List<Result> results =
+				run(context, name, 40, r -> r.enqueue(lunge), mc -> {
+					if(mc.player.getInventory().getSelectedSlot() == SPEAR_SLOT)
+						spearTicks[0]++;
+				});
+			Result r = single(results, name, failures);
+			if(r == null)
+				continue;
+			
+			// let the player slide to a stop
+			context.waitTicks(20);
+			double distance = horizontalDist(playerPos(context), start);
+			int slot = context.computeOnClient(
+				mc -> mc.player.getInventory().getSelectedSlot());
+			
+			Vec3 expected = lunge.expectedImpulse();
+			Vec3 measured = lunge.measuredImpulse();
+			LOGGER.info(
+				"SM: {} impulse expected={} measured={} distance={} spearTicks={}",
+				name, fmt(expected), fmt(measured), fmt(distance),
+				spearTicks[0]);
+			
+			if(measured.distanceTo(expected) > 0.15 * expected.length())
+				failures.add(name + ": impulse " + fmt(measured)
+					+ " vs expected " + fmt(expected));
+			if(distance >= lastDistance)
+				failures.add(name + ": went " + fmt(distance)
+					+ " blocks, not less than the flatter lunge");
+			if(slot != HAND_SLOT)
+				failures.add(name + ": still holding slot " + slot);
+			if(spearTicks[0] > 2)
+				failures.add(
+					name + ": held the spear for " + spearTicks[0] + " ticks");
+			lastDistance = distance;
+		}
+	}
+	
+	private void testVerticalPearlCatch(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		double shortY = pearlCatchTrials(context, server, failures,
+			"Vertical catch delay 2", UP, 2, 5, 4);
+		double longY = pearlCatchTrials(context, server, failures,
+			"Vertical catch delay 4", UP, 4, 5, 4);
+		if(!(longY > shortY))
+			failures.add("Vertical catch: later catch wasn't higher (delay 2: "
+				+ fmt(shortY) + ", delay 4: " + fmt(longY) + ")");
+	}
+	
+	/**
+	 * @return the average height gained by the successful catches
+	 */
+	private double pearlCatchTrials(ClientGameTestContext context,
+		TestServerContext server, List<String> failures, String name,
+		Rotation aim, int delay, int trials, int required)
+	{
+		int successes = 0;
+		double gained = 0;
+		for(int i = 0; i < trials; i++)
+		{
+			String trial = name + " #" + (i + 1);
+			reset(context, server);
+			Vec3 start = playerPos(context);
+			PearlCatch pearlCatch = new PearlCatch(aim, delay);
+			Result r =
+				single(run(context, trial, 120, rr -> rr.enqueue(pearlCatch)),
+					trial, null);
+			if(r == null)
+				continue;
+			
+			double error =
+				pearlCatch.teleportedTo().distanceTo(r.prediction().endPos());
+			LOGGER.info("SM: {} teleported to {} predicted {} error={}", trial,
+				fmt(pearlCatch.teleportedTo()), fmt(r.prediction().endPos()),
+				fmt(error));
+			// within about one pearl move
+			if(error > 1.5)
+				continue;
+			
+			successes++;
+			gained += pearlCatch.teleportedTo().y - start.y;
+		}
+		
+		LOGGER.info("SM: {} {}/{} accurate catches", name, successes, trials);
+		if(successes < required)
+			failures.add(name + ": only " + successes + "/" + trials
+				+ " accurate catches");
+		return successes == 0 ? Double.NaN : gained / successes;
+	}
+	
+	private void testDiagonalCatchAfterWindCharge(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		int successes = 0;
+		for(int i = 0; i < 5; i++)
+		{
+			String name = "WindCharge -> diagonal catch #" + (i + 1);
+			reset(context, server);
+			PearlCatch pearlCatch = PearlCatch.mostReliable(DIAGONAL);
+			List<Result> results = run(context, name, 150, r -> {
+				r.enqueue(WindChargeJump.atFeet(false));
+				r.enqueue(pearlCatch, StartCondition.atApex());
+			});
+			
+			if(!allDone(results, 2, name, null))
+				continue;
+			
+			Result c = results.get(1);
+			double error =
+				pearlCatch.teleportedTo().distanceTo(c.prediction().endPos());
+			LOGGER.info(
+				"SM: {} delay={} p={} from {} to {} predicted {} error={}",
+				name, pearlCatch.delay(), fmt(c.prediction().pSuccess()),
+				fmt(c.startPos()), fmt(pearlCatch.teleportedTo()),
+				fmt(c.prediction().endPos()), fmt(error));
+			// within about one pearl move
+			if(error <= 1.5)
+				successes++;
+		}
+		
+		if(successes < 3)
+			failures.add("WindCharge -> diagonal catch: only " + successes
+				+ "/5 accurate catches");
+	}
+	
+	private void testLungesWhileFalling(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Lunges while falling";
+		reset(context, server);
+		runCommand(server, "tp @p ~ ~40 ~ 0 0");
+		context.waitFor(mc -> !mc.player.onGround());
+		
+		Vec3 start = playerPos(context);
+		ArrayList<SpearLunge> lunges = new ArrayList<>();
+		List<Result> results = run(context, name, 200, r -> {
+			for(int i = 0; i < 4; i++)
+			{
+				SpearLunge lunge = new SpearLunge(0, 0);
+				lunges.add(lunge);
+				r.enqueue(lunge, StartCondition
+					.when(p -> !p.onGround() && p.getY() > start.y - 35));
+			}
+		});
+		context.waitFor(mc -> mc.player.onGround(), 200);
+		double distance = horizontalDist(playerPos(context), start);
+		
+		allDone(results, 4, name, failures);
+		for(int i = 0; i < lunges.size(); i++)
+		{
+			SpearLunge lunge = lunges.get(i);
+			Vec3 measured = lunge.measuredImpulse();
+			LOGGER.info(
+				"SM: {} #{} impulse expected={} measured={} attempts={}", name,
+				i + 1, fmt(lunge.expectedImpulse()), fmt(measured),
+				lunge.attempts());
+			if(measured != null
+				&& measured.distanceTo(lunge.expectedImpulse()) > 0.2
+					* lunge.expectedImpulse().length())
+				failures.add(name + " #" + (i + 1) + ": impulse "
+					+ fmt(measured) + " vs " + fmt(lunge.expectedImpulse()));
+		}
+		
+		LOGGER.info("SM: {} travelled {} blocks", name, fmt(distance));
+		if(distance < 20)
+			failures.add(name + ": only travelled " + fmt(distance));
+	}
+	
+	private void testChain(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		int successes = 0;
+		for(int i = 0; i < 5; i++)
+		{
+			String name = "Chain #" + (i + 1);
+			reset(context, server);
+			PearlCatch pearlCatch = PearlCatch.mostReliable(STEEP_DIAGONAL);
+			List<Result> results = run(context, name, 200, r -> {
+				r.enqueue(WindChargeJump.atFeet(false));
+				r.enqueue(new SpearLunge(0, 0), StartCondition.atApex());
+				r.enqueue(pearlCatch);
+			});
+			
+			if(!allDone(results, 3, name, null))
+				continue;
+			
+			Result c = results.get(2);
+			double error =
+				pearlCatch.teleportedTo().distanceTo(c.prediction().endPos());
+			LOGGER.info(
+				"SM: {} catch delay={} p={} from {} to {} predicted {} error={}",
+				name, pearlCatch.delay(), fmt(c.prediction().pSuccess()),
+				fmt(c.startPos()), fmt(pearlCatch.teleportedTo()),
+				fmt(c.prediction().endPos()), fmt(error));
+			// after the lunge, one pearl move is about 2.6 blocks
+			if(error <= 3)
+				successes++;
+		}
+		
+		if(successes < 3)
+			failures.add("Chain: only " + successes + "/5 complete chains");
+	}
+	
+	private void testInfeasibleCatch(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Infeasible catch";
+		reset(context, server);
+		
+		int maxDelay = context.computeOnClient(
+			mc -> PearlCatch.maxFeasibleDelay(UP, PearlCatch.MIN_CHANCE));
+		LOGGER.info("SM: {} max feasible delay straight up = {}", name,
+			maxDelay);
+		if(maxDelay < 2 || maxDelay >= PearlCatch.MAX_DELAY)
+		{
+			failures.add(name + ": implausible max feasible delay " + maxDelay);
+			return;
+		}
+		
+		int tooFar = maxDelay + 6;
+		int pearlsBefore = countPearls(context);
+		List<Result> results =
+			run(context, name, 20, r -> r.enqueue(new PearlCatch(UP, tooFar)));
+		int pearlsAfter = countPearls(context);
+		
+		Result r = results.isEmpty() ? null : results.get(0);
+		if(r == null || r.status() != Status.FAILED
+			|| !r.reason().startsWith("infeasible"))
+			failures.add(name + ": delay " + tooFar + " wasn't refused: " + r);
+		if(pearlsAfter != pearlsBefore)
+			failures.add(name + ": threw a pearl anyway");
+	}
+	
+	private void runCombatTests(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		testStrikeFromAbove(context, server, failures, "Strike from high above",
+			40, Kind.SPEARMACE);
+		testStrikeFromAbove(context, server, failures,
+			"Strike from medium height", 16, Kind.SWORDMACE);
+		testStrikeFromAbove(context, server, failures, "Strike from low", 7,
+			Kind.HANDMACE);
+		testBelowReachable(context, server, failures);
+		testBelowUnreachable(context, server, failures);
+		testStunSlam(context, server, failures);
+		testCombatChain(context, server, failures);
+	}
+	
+	private void testStrikeFromAbove(ClientGameTestContext context,
+		TestServerContext server, List<String> failures, String name,
+		double height, Kind expected)
+	{
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + (GROUND_Y + height) + " "
+			+ TARGET_Z + " 0 90");
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(golem) != null);
+		
+		Engage engage = runEngage(context, name, golem, failures);
+		if(engage == null)
+			return;
+		
+		Kind kind = engage.decision().kind();
+		if(kind != expected)
+			failures.add(name + ": picked " + engage.decision() + ", expected "
+				+ expected);
+		if(engage.decision().maneuver() instanceof MaceStrike strike)
+			checkStrike(context, name, strike, kind == Kind.SPEARMACE,
+				failures);
+	}
+	
+	/**
+	 * Checks damage and launch of a strike that just finished, then waits
+	 * for the apex and compares it with the prediction.
+	 */
+	private void checkStrike(ClientGameTestContext context, String name,
+		MaceStrike strike, boolean beyondNormalReach, List<String> failures)
+	{
+		StrikeOption s = strike.struck();
+		double damage = initialHealth - targetHealth;
+		LOGGER.info(
+			"SM: {} struck {} damage actual={} predicted={} launch expected={} measured={} attempts={}",
+			name, s, fmt(damage), fmt(s.damage()),
+			fmt(strike.expectedLaunchVelY()), fmt(strike.measuredLaunchVelY()),
+			strike.attempts());
+		
+		if(Math.abs(damage - s.damage()) > Math.max(1.5, 0.05 * s.damage()))
+			failures.add(name + ": dealt " + fmt(damage) + " damage, predicted "
+				+ fmt(s.damage()) + " (" + s + ")");
+		if(Math.abs(
+			strike.measuredLaunchVelY() - strike.expectedLaunchVelY()) > 0.15)
+			failures
+				.add(name + ": launched at " + fmt(strike.measuredLaunchVelY())
+					+ ", expected " + fmt(strike.expectedLaunchVelY()));
+		if(beyondNormalReach && !(s.distance() > Loadout.DEFAULT_REACH))
+			failures.add(name + ": hit from " + fmt(s.distance())
+				+ ", not beyond normal reach");
+	}
+	
+	private void testBelowReachable(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Below target, in spear reach";
+		reset(context, server);
+		
+		// both fall from rest, but the client shows the golem a few ticks
+		// late, so it seems to drift away while falling
+		double feetY = GROUND_Y + 35;
+		int golem = spawnGolemWithPlayer(server, feetY + 1.62 + 2, feetY);
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(golem) != null);
+		
+		Engage engage = runEngage(context, name, golem, failures);
+		if(engage == null)
+			return;
+		
+		if(engage.decision().kind() != Kind.SPEARMACE)
+		{
+			failures.add(name + ": picked " + engage.decision());
+			return;
+		}
+		
+		MaceStrike strike = (MaceStrike)engage.decision().maneuver();
+		checkStrike(context, name, strike, false, failures);
+		
+		context.waitFor(mc -> mc.player.getDeltaMovement().y <= 0, 100);
+		double[] heights = context.computeOnClient(mc -> new double[]{
+			mc.player.getY(), clientEntity(golem).getEyeY()});
+		LOGGER.info("SM: {} at apex feet={} target eyes={}", name,
+			fmt(heights[0]), fmt(heights[1]));
+		if(!(heights[0] > heights[1]))
+			failures.add(name + ": ended below the target (feet "
+				+ fmt(heights[0]) + ", target eyes " + fmt(heights[1]) + ")");
+	}
+	
+	private void testBelowUnreachable(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Below target, out of reach";
+		reset(context, server);
+		
+		double feetY = GROUND_Y + 35;
+		int golem = spawnGolemWithPlayer(server, feetY + 1.62 + 9, feetY);
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(golem) != null);
+		
+		double before = horizontalGap(context, golem);
+		Engage engage = runEngage(context, name, golem, failures);
+		if(engage == null)
+			return;
+		
+		if(engage.decision().kind() != Kind.ESCAPE_LUNGE)
+		{
+			failures.add(name + ": picked " + engage.decision());
+			return;
+		}
+		
+		context.waitTicks(5);
+		double after = horizontalGap(context, golem);
+		SpearLunge lunge = ((EscapeLunge)engage.decision().maneuver()).lunge();
+		LOGGER.info("SM: {} gap {} -> {} impulse expected={} measured={}", name,
+			fmt(before), fmt(after), fmt(lunge.expectedImpulse()),
+			fmt(lunge.measuredImpulse()));
+		if(after - before < 2)
+			failures.add(name + ": only got " + fmt(after - before)
+				+ " blocks further away");
+	}
+	
+	private void testStunSlam(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		// control: a plain mace hit into the shield does nothing
+		String control = "Mace into raised shield";
+		reset(context, server);
+		int dummy = spawnShieldDummy(server);
+		runCommand(server, "tp @p " + TARGET_X + " " + (GROUND_Y + 10) + " "
+			+ (TARGET_Z - 1.2) + " 0 90");
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(dummy) != null);
+		context.waitTicks(1);
+		
+		MaceStrike[] plain = new MaceStrike[1];
+		List<Result> results = run(context, control, 80, r -> {
+			plain[0] = new MaceStrike(clientEntity(dummy), PreItem.HAND);
+			r.enqueue(plain[0]);
+		});
+		double controlDamage = initialHealth - targetHealth;
+		LOGGER.info("SM: {} {} attempts={} damage={}", control, results,
+			plain[0].attempts(), fmt(controlDamage));
+		if(plain[0].attempts() == 0)
+			failures.add(control + ": never attacked");
+		if(controlDamage > 0.5)
+			failures.add(control + ": the shield let " + fmt(controlDamage)
+				+ " damage through");
+		
+		String name = "StunSlam";
+		reset(context, server);
+		int dummy2 = spawnShieldDummy(server);
+		runCommand(server, "tp @p " + TARGET_X + " " + (GROUND_Y + 10) + " "
+			+ (TARGET_Z - 1.2) + " 0 90");
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(dummy2) != null);
+		context.waitTicks(1);
+		
+		Engage engage = runEngage(context, name, dummy2, failures);
+		if(engage == null)
+			return;
+		
+		if(engage.decision().kind() != Kind.STUNSLAM)
+		{
+			failures.add(name + ": picked " + engage.decision());
+			return;
+		}
+		
+		StunSlam slam = (StunSlam)engage.decision().maneuver();
+		double damage = initialHealth - targetHealth;
+		boolean[] shield = server.computeOnServer(mc -> {
+			ShieldDummy d = shieldDummy;
+			return new boolean[]{d.isUsingItem(),
+				d.getCooldowns().isOnCooldown(new ItemStack(Items.SHIELD))};
+		});
+		LOGGER.info(
+			"SM: {} damage actual={} predicted={} fall={} launch expected={} measured={} using={} cooldown={} clientSawDown={}",
+			name, fmt(damage), fmt(slam.expectedDamage()),
+			fmt(slam.expectedFall()), fmt(slam.expectedLaunchVelY()),
+			fmt(slam.measuredLaunchVelY()), shield[0], shield[1],
+			slam.shieldWasDown());
+		
+		if(shield[0] || !shield[1])
+			failures.add(name + ": shield wasn't disabled (using=" + shield[0]
+				+ ", cooldown=" + shield[1] + ")");
+		if(Math.abs(damage - slam.expectedDamage()) > Math.max(1.5,
+			0.05 * slam.expectedDamage()))
+			failures.add(name + ": dealt " + fmt(damage) + " damage, predicted "
+				+ fmt(slam.expectedDamage()));
+		if(Math
+			.abs(slam.measuredLaunchVelY() - slam.expectedLaunchVelY()) > 0.15)
+			failures
+				.add(name + ": launched at " + fmt(slam.measuredLaunchVelY())
+					+ ", expected " + fmt(slam.expectedLaunchVelY()));
+	}
+	
+	private void testCombatChain(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "WindCharge -> strike -> strike";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		Engage[] engages = new Engage[2];
+		List<Result> results = run(context, name, 250, r -> {
+			engages[0] = new Engage(clientEntity(golem));
+			engages[1] = new Engage(clientEntity(golem));
+			r.enqueue(WindChargeJump.atFeet(false));
+			r.enqueue(engages[0], StartCondition.atApex());
+			r.enqueue(engages[1], StartCondition.atApex());
+		});
+		
+		if(!allDone(results, 3, name, failures))
+			return;
+		
+		LOGGER.info("SM: {} picked {} then {}, total damage {}", name,
+			engages[0].decision(), engages[1].decision(),
+			fmt(initialHealth - targetHealth));
+	}
+	
+	/** Runs one {@link Engage} against the given client entity. */
+	private Engage runEngage(ClientGameTestContext context, String name,
+		int targetId, List<String> failures)
+	{
+		Engage[] engage = new Engage[1];
+		List<Result> results = run(context, name, 150, r -> {
+			engage[0] = new Engage(clientEntity(targetId));
+			r.enqueue(engage[0]);
+		});
+		
+		LOGGER.info("SM: {} decision {}", name, engage[0].decision());
+		return single(results, name, failures) == null ? null : engage[0];
+	}
+	
+	private int spawnGolem(TestServerContext server, double x, double y,
+		double z, boolean noAi)
+	{
+		int id = server.computeOnServer(mc -> {
+			ServerLevel level = mc.overworld();
+			IronGolem golem =
+				EntityTypes.IRON_GOLEM.create(level, EntitySpawnReason.COMMAND);
+			golem.snapTo(x, y, z, 0, 0);
+			golem.setNoAi(noAi);
+			golem.getAttribute(Attributes.MAX_HEALTH)
+				.setBaseValue(TARGET_HEALTH);
+			golem.setHealth((float)TARGET_HEALTH);
+			level.addFreshEntity(golem);
+			return golem.getId();
+		});
+		watchTarget(id);
+		return id;
+	}
+	
+	/**
+	 * Spawns a golem that falls (it needs AI for that) and puts the player
+	 * under it in the same server tick.
+	 */
+	private int spawnGolemWithPlayer(TestServerContext server, double golemY,
+		double playerY)
+	{
+		int id = spawnGolem(server, TARGET_X + 0.3, golemY, TARGET_Z, false);
+		server.runOnServer(mc -> {
+			getServerPlayer(mc).connection.teleport(TARGET_X, playerY, TARGET_Z,
+				0, -90);
+			mc.overworld().getEntity(id).snapTo(TARGET_X + 0.3, golemY,
+				TARGET_Z, 0, 0);
+		});
+		return id;
+	}
+	
+	private int spawnShieldDummy(TestServerContext server)
+	{
+		int id = server.computeOnServer(mc -> {
+			// facing north, toward the player
+			shieldDummy = ShieldDummy.spawn(mc, TARGET_X, GROUND_Y, TARGET_Z,
+				180, TARGET_HEALTH);
+			return shieldDummy.getId();
+		});
+		watchTarget(id);
+		return id;
+	}
+	
+	private void watchTarget(int id)
+	{
+		targetId = id;
+		initialHealth = TARGET_HEALTH;
+		targetHealth = TARGET_HEALTH;
+	}
+	
+	private String describeClientTarget()
+	{
+		LivingEntity target = targetId < 0 ? null : clientEntity(targetId);
+		if(target == null)
+			return "";
+		return String.format(" target=%s tvel=%s", fmt(target.position()),
+			fmt(target.getDeltaMovement()));
+	}
+	
+	private static LivingEntity clientEntity(int id)
+	{
+		return Minecraft.getInstance().level
+			.getEntity(id) instanceof LivingEntity e ? e : null;
+	}
+	
+	private static double horizontalGap(ClientGameTestContext context, int id)
+	{
+		return context
+			.computeOnClient(mc -> horizontalDist(mc.player.position(),
+				clientEntity(id).position()));
+	}
+	
+	/**
+	 * Runs the runner until it is idle, logging every tick.
+	 */
+	private List<Result> run(ClientGameTestContext context, String name,
+		int maxTicks, Consumer<ManeuverRunner> setup)
+	{
+		return run(context, name, maxTicks, setup, mc -> {});
+	}
+	
+	private List<Result> run(ClientGameTestContext context, String name,
+		int maxTicks, Consumer<ManeuverRunner> setup,
+		Consumer<Minecraft> perTick)
+	{
+		context.runOnClient(mc -> {
+			runner = new ManeuverRunner();
+			setup.accept(runner);
+			runner.start();
+		});
+		
+		for(int tick = 0; tick < maxTicks; tick++)
+		{
+			context.waitTick();
+			int t = tick;
+			logServerProjectiles(name, t);
+			boolean idle = context.computeOnClient(mc -> {
+				perTick.accept(mc);
+				LOGGER.info(String.format(
+					"SM [%s t%d] pos=%s vel=%s rot=(%.1f, %.1f) slot=%d ground=%s%s",
+					name, t, fmt(mc.player.position()),
+					fmt(mc.player.getDeltaMovement()), mc.player.getYRot(),
+					mc.player.getXRot(),
+					mc.player.getInventory().getSelectedSlot(),
+					mc.player.onGround(), describeClientTarget()));
+				return runner.isIdle();
+			});
+			if(idle)
+				break;
+		}
+		
+		return context.computeOnClient(mc -> {
+			runner.stop();
+			return runner.results();
+		});
+	}
+	
+	/**
+	 * Logs the server's view of thrown projectiles: ground truth for the
+	 * timing model.
+	 */
+	private void logServerProjectiles(String name, int tick)
+	{
+		String projectiles = server.computeOnServer(mc -> {
+			ServerPlayer p = getServerPlayer(mc);
+			StringBuilder sb = new StringBuilder();
+			for(Entity e : p.level().getEntities(p,
+				p.getBoundingBox().inflate(64),
+				e -> e instanceof ThrownEnderpearl || e instanceof WindCharge))
+				sb.append(String.format(" %s#%d age=%d pos=%s vel=%s",
+					e instanceof WindCharge ? "charge" : "pearl", e.getId(),
+					e.tickCount, fmt(e.position()), fmt(e.getDeltaMovement())));
+			if(targetId >= 0
+				&& p.level().getEntity(targetId) instanceof LivingEntity t)
+			{
+				targetHealth = t.getHealth();
+				sb.append(String.format(" target=%s health=%.2f using=%s",
+					fmt(t.position()), t.getHealth(), t.isUsingItem()));
+			}
+			return String.format("feet=%s fall=%.2f%s", fmt(p.position()),
+				p.fallDistance, sb);
+		});
+		LOGGER.info("SM server [{} t{}] {}", name, tick, projectiles);
+	}
+	
+	private static Result single(List<Result> results, String name,
+		List<String> failures)
+	{
+		return allDone(results, 1, name, failures) ? results.get(0) : null;
+	}
+	
+	private static boolean allDone(List<Result> results, int expected,
+		String name, List<String> failures)
+	{
+		String problem = null;
+		if(results.size() < expected)
+			problem = "only " + results.size() + "/" + expected
+				+ " maneuvers finished";
+		else
+			for(Result r : results)
+				if(r.status() != Status.DONE)
+					problem = r.toString();
+				
+		if(problem == null)
+			return true;
+		
+		LOGGER.warn("SM: {} failed: {}", name, problem);
+		if(failures != null)
+			failures.add(name + ": " + problem);
+		return false;
+	}
+	
+	private void reset(ClientGameTestContext context, TestServerContext server)
+	{
+		releaseKeys(context);
+		targetId = -1;
+		if(shieldDummy != null)
+		{
+			ShieldDummy dummy = shieldDummy;
+			server.runOnServer(mc -> dummy.remove(mc));
+			shieldDummy = null;
+		}
+		runCommand(server, "gamemode survival");
+		runCommand(server, "kill @e[type=!player]");
+		runCommand(server, "tp @p 0.5 -60 0.5 0 0");
+		runCommand(server, "clear");
+		runCommand(server, "item replace entity @p hotbar." + SPEAR_SLOT
+			+ " with netherite_spear[enchantments={\"minecraft:lunge\":3}]");
+		runCommand(server,
+			"item replace entity @p hotbar.2 with wind_charge 64");
+		runCommand(server,
+			"item replace entity @p hotbar.3 with ender_pearl 16");
+		runCommand(server, "item replace entity @p hotbar.4 with"
+			+ " mace[enchantments={\"minecraft:wind_burst\":3}]");
+		runCommand(server,
+			"item replace entity @p hotbar.5 with netherite_sword");
+		runCommand(server,
+			"item replace entity @p hotbar.6 with netherite_axe");
+		runCommand(server, "effect give @p resistance infinite 4 true");
+		runCommand(server, "effect give @p saturation infinite 0 true");
+		server.runOnServer(mc -> {
+			ServerPlayer p = getServerPlayer(mc);
+			p.setHealth(p.getMaxHealth());
+			p.resetFallDistance();
+		});
+		context.runOnClient(_ -> KeyInput.selectSlot(HAND_SLOT));
+		
+		// wait out the pearl cooldown and let the player settle
+		context.waitTicks(25);
+	}
+	
+	private static void releaseKeys(ClientGameTestContext context)
+	{
+		context.runOnClient(mc -> {
+			IKeyMapping.get(mc.options.keyUp).resetDownState();
+			IKeyMapping.get(mc.options.keySprint).resetDownState();
+			IKeyMapping.get(mc.options.keyJump).resetDownState();
+			mc.player.setSprinting(false);
+		});
+	}
+	
+	private static Vec3 playerPos(ClientGameTestContext context)
+	{
+		return context.computeOnClient(mc -> mc.player.position());
+	}
+	
+	private static int countPearls(ClientGameTestContext context)
+	{
+		return context.computeOnClient(
+			mc -> mc.player.getInventory().countItem(Items.ENDER_PEARL));
+	}
+	
+	private static double horizontalDist(Vec3 a, Vec3 b)
+	{
+		return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.z - b.z, 2));
+	}
+	
+	private static ServerPlayer getServerPlayer(MinecraftServer mc)
+	{
+		return mc.getPlayerList().getPlayers().getFirst();
+	}
+	
+	private static String fmt(double d)
+	{
+		return String.format("%.2f", d);
+	}
+	
+	private static String fmt(Vec3 v)
+	{
+		return v == null ? "null"
+			: String.format("(%.2f, %.2f, %.2f)", v.x, v.y, v.z);
+	}
+}

@@ -51,6 +51,9 @@ public class WurstTest implements FabricClientGameTest
 	@Override
 	public void runTest(ClientGameTestContext context)
 	{
+		if(SpearMaceTest.isEnabled())
+			return;
+		
 		LOGGER.info("Starting Wurst Client GameTest");
 		hideSplashTexts(context);
 		waitForTitleScreenFade(context);
@@ -161,7 +164,7 @@ public class WurstTest implements FabricClientGameTest
 	}
 	
 	// because the grass texture is randomized and smooth stone isn't
-	private void applyFlatPresetWithSmoothStone(WorldCreationUiState creator)
+	static void applyFlatPresetWithSmoothStone(WorldCreationUiState creator)
 	{
 		FlatLevelGeneratorSettings config = ((FlatLevelSource)creator
 			.getSettings().selectedDimensions().overworld()).settings();
