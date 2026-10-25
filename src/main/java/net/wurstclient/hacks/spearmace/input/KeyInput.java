@@ -11,6 +11,7 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.model.TickInput;
 import net.wurstclient.mixinterface.IKeyMapping;
 import net.wurstclient.util.Rotation;
 
@@ -31,19 +32,56 @@ public enum KeyInput
 	
 	private static final Minecraft MC = WurstClient.MC;
 	
+	/** The tick of the update that queued the clicks below. */
+	private static int clickTick = Integer.MIN_VALUE;
+	private static int clickedSlot = -1;
+	private static boolean clickedAttack;
+	private static boolean clickedUse;
+	
 	public static void selectSlot(int slot)
 	{
 		click(MC.options.keyHotbarSlots[slot]);
+		note();
+		clickedSlot = slot;
 	}
 	
 	public static void clickAttack()
 	{
 		click(MC.options.keyAttack);
+		note();
+		clickedAttack = true;
 	}
 	
 	public static void clickUse()
 	{
 		click(MC.options.keyUse);
+		note();
+		clickedUse = true;
+	}
+	
+	/**
+	 * What this update has done to the controls so far, as a
+	 * {@link TickInput}.
+	 */
+	public static TickInput thisUpdate()
+	{
+		boolean now = clickTick == MC.player.tickCount;
+		return new TickInput(
+			new Rotation(MC.player.getYRot(), MC.player.getXRot()),
+			MC.options.keyUp.isDown(), MC.player.isSprinting(),
+			MC.options.keyJump.isDown(), now ? clickedSlot : -1,
+			now && clickedAttack, now && clickedUse);
+	}
+	
+	private static void note()
+	{
+		if(clickTick == MC.player.tickCount)
+			return;
+		
+		clickTick = MC.player.tickCount;
+		clickedSlot = -1;
+		clickedAttack = false;
+		clickedUse = false;
 	}
 	
 	public static void holdJump(boolean held)

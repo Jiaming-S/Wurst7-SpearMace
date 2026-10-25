@@ -49,6 +49,7 @@ accessible	field	net/minecraft/world/entity/LivingEntity	useItemRemaining	I
 accessible	field	net/minecraft/world/entity/Mob	DATA_MOB_FLAGS_ID	Lnet/minecraft/network/syncher/EntityDataAccessor;
 accessible	field	net/minecraft/world/entity/animal/goat/Goat	isLoweringHead	Z
 accessible	field	net/minecraft/world/entity/monster/zombie/ZombifiedPiglin	SPEED_MODIFIER_ATTACKING_ID	Lnet/minecraft/resources/Identifier;
+accessible	field	net/minecraft/world/entity/player/Player	lastItemInMainHand	Lnet/minecraft/world/item/ItemStack;
 accessible	field	net/minecraft/world/item/ItemCooldowns	cooldowns	Ljava/util/Map;
 accessible	field	net/minecraft/world/item/ItemCooldowns	tickCount	I
 accessible	field	net/minecraft/world/level/chunk/PalettedContainer	data	Lnet/minecraft/world/level/chunk/PalettedContainer$Data;

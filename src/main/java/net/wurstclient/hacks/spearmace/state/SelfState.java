@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.WindCharge;
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
@@ -33,6 +34,9 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
  *            whether the forward key is held, see {@link PlayerSim}
  * @param jump
  *            whether the jump key is held
+ * @param heldChanged
+ *            whether the held item changed since the last player tick,
+ *            which resets the attack charge in the next one
  * @param missTime
  *            {@code Minecraft.missTime}, which blocks attack clicks
  * @param interactionRange
@@ -43,8 +47,9 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
 public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 	double fallDistance, float yaw, float pitch, boolean forward,
 	boolean sprinting, boolean jump, boolean fallFlying,
-	int attackStrengthTicker, int missTime, double interactionRange,
-	double knockbackResistance, Kit kit, List<Pending> pending)
+	int attackStrengthTicker, boolean heldChanged, int missTime,
+	double interactionRange, double knockbackResistance, Kit kit,
+	List<Pending> pending)
 {
 	private static final Minecraft MC = WurstClient.MC;
 	
@@ -60,8 +65,10 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 			MC.player.fallDistance, MC.player.getYRot(), MC.player.getXRot(),
 			MC.options.keyUp.isDown(), MC.player.isSprinting(),
 			MC.options.keyJump.isDown(), MC.player.isFallFlying(),
-			MC.player.attackStrengthTicker, MC.missTime,
-			MC.player.entityInteractionRange(),
+			MC.player.attackStrengthTicker,
+			!ItemStack.isSameItem(MC.player.lastItemInMainHand,
+				MC.player.getMainHandItem()),
+			MC.missTime, MC.player.entityInteractionRange(),
 			MC.player
 				.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE),
 			Kit.capture(), ownProjectiles());
@@ -77,7 +84,9 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 			
 			if(e instanceof WindCharge c && c.getOwner() == MC.player)
 				pending.add(new WindChargeInFlight(c.getId(), c.position(),
-					c.getDeltaMovement(), c.tickCount));
+					c.getDeltaMovement(), c.tickCount,
+					!c.getBoundingBox().expandTowards(c.getDeltaMovement())
+						.inflate(1).intersects(MC.player.getBoundingBox())));
 			else if(e instanceof ThrownEnderpearl p
 				&& p.getOwner() == MC.player)
 				pending.add(new PearlInFlight(p.getId(), p.position(),

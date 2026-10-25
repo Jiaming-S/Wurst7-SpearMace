@@ -54,6 +54,13 @@ import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner.StartCondition;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
 import net.wurstclient.hacks.spearmace.maneuver.WindChargeJump;
+import net.wurstclient.hacks.spearmace.model.Recorder;
+import net.wurstclient.hacks.spearmace.model.Recorder.Frame;
+import net.wurstclient.hacks.spearmace.model.Replay;
+import net.wurstclient.hacks.spearmace.model.Replay.Report;
+import net.wurstclient.hacks.spearmace.model.Replay.StepError;
+import net.wurstclient.hacks.spearmace.model.TargetModel;
+import net.wurstclient.hacks.spearmace.model.TickSim;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.TargetSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
@@ -97,6 +104,11 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private static final Rotation STEEP_DIAGONAL = new Rotation(0, -45);
 	
 	private ManeuverRunner runner;
+	
+	private record NamedReport(String name, Report filtered, Report open)
+	{}
+	
+	private final ArrayList<NamedReport> replays = new ArrayList<>();
 	private TestServerContext server;
 	
 	/** The combat target whose server-side health gets logged, or -1. */
@@ -163,6 +175,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 			
 			if(runs("combat"))
 				runCombatTests(context, server, failures);
+		}
+		
+		for(NamedReport r : replays)
+		{
+			LOGGER.info("SM replay summary [{}] {}", r.name(),
+				r.filtered().summary());
+			checkReplay(r, failures);
 		}
 		
 		if(!failures.isEmpty())
@@ -937,10 +956,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 		int maxTicks, Consumer<ManeuverRunner> setup,
 		Consumer<Minecraft> perTick)
 	{
+		Recorder recorder =
+			new Recorder(() -> targetId >= 0 ? clientEntity(targetId) : null);
 		context.runOnClient(mc -> {
 			runner = new ManeuverRunner();
 			setup.accept(runner);
 			runner.start();
+			recorder.start();
 		});
 		
 		for(int tick = 0; tick < maxTicks; tick++)
@@ -965,8 +987,50 @@ public final class SpearMaceTest implements FabricClientGameTest
 		
 		return context.computeOnClient(mc -> {
 			runner.stop();
+			recorder.stop();
+			replay(mc, name, recorder.frames());
 			return runner.results();
 		});
+	}
+	
+	/**
+	 * Fails if the forward model got anything wrong that it should get
+	 * exactly right. Steps where the server handled something a tick early
+	 * or late are left out, and a step or two may still be off because of
+	 * random projectile spread.
+	 */
+	private static void checkReplay(NamedReport r, List<String> failures)
+	{
+		Report f = r.filtered().exact();
+		String name = r.name() + " replay";
+		check(failures, name, "slot errors", f.slotErrors() == 0);
+		check(failures, name, "attack charge errors",
+			f.max(StepError::ticker) == 0);
+		check(failures, name, "cooldown errors",
+			f.max(StepError::windChargeCooldown) == 0
+				&& f.max(StepError::pearlCooldown) == 0);
+		check(failures, name, "fall distance errors",
+			f.max(StepError::fall) < 0.01);
+		check(failures, name, "position errors",
+			f.steps().stream().filter(s -> s.pos() > 0.01).count() <= 1);
+		check(failures, name, "velocity errors",
+			f.steps().stream().filter(s -> s.vel() > 0.05).count() <= 2);
+		check(failures, name, "target health errors", f.steps().stream()
+			.filter(s -> Math.abs(s.targetHealth()) > 1).count() <= 1);
+	}
+	
+	/** Checks the forward model against what really happened. */
+	private void replay(Minecraft mc, String name, List<Frame> frames)
+	{
+		TickSim sim = new TickSim(mc.level, TargetModel.ballistic());
+		Report filtered = Replay.filtered(sim, frames);
+		Report open = Replay.openLoop(sim, frames);
+		LOGGER.info("SM replay [{}] filtered: {}", name, filtered.summary());
+		LOGGER.info("SM replay [{}] open loop: {}", name, open.summary());
+		for(StepError e : filtered.worse(0.01, 0.01, 0))
+			LOGGER.info("SM replay [{}] {}", name, e);
+		
+		replays.add(new NamedReport(name, filtered, open));
 	}
 	
 	/**

@@ -9,7 +9,6 @@ package net.wurstclient.hacks.spearmace.combat;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.AttackRange;
@@ -182,29 +181,42 @@ public final class Engagement
 		if(i >= landing || i > HORIZON)
 			return false;
 		
-		AABB box = targetBox[i];
-		Vec3 eye = eye(i);
-		if(distance(i) > Loadout.DEFAULT_REACH + SERVER_BUFFER - REACH_SAFETY)
+		return picks(eye(i), aim(i).toLookVec(), selfVel[i], held, targetBox[i],
+			state.self().interactionRange(), REACH_SAFETY);
+	}
+	
+	/**
+	 * Whether the crosshair pick from {@code eye} along {@code look} finds
+	 * {@code box} while holding {@code held}, and whether the server would
+	 * then accept a mace hit.
+	 *
+	 * @param vel
+	 *            the player's velocity, which makes spear picks longer
+	 * @param safety
+	 *            kept off every reach limit
+	 */
+	public static boolean picks(Vec3 eye, Vec3 look, Vec3 vel, ItemStack held,
+		AABB box, double interactionRange, double safety)
+	{
+		double distance = Math.sqrt(box.distanceToSqr(eye));
+		if(distance > Loadout.DEFAULT_REACH + SERVER_BUFFER - safety)
 			return false;
-		
-		Vec3 look = aim(i).toLookVec();
-		
+			
 		// LocalPlayer.raycastHitResult(): items with an attack range pick
 		// along a segment, which is longer when moving along the view
 		AttackRange range = held.get(DataComponents.ATTACK_RANGE);
 		if(range != null)
 		{
-			double extra = Math.max(0, selfVel[i].dot(look));
+			double extra = Math.max(0, vel.dot(look));
 			Vec3 from = eye.add(look.scale(range.minReach()));
-			Vec3 to =
-				eye.add(look.scale(range.maxReach() + extra - REACH_SAFETY));
+			Vec3 to = eye.add(look.scale(range.maxReach() + extra - safety));
 			AABB inflated = box.inflate(range.hitboxMargin());
 			if(inflated.contains(from) || inflated.clip(from, to).isPresent())
 				return true;
 		}
 		
 		// otherwise it falls back to the normal pick
-		double reach = state.self().interactionRange() - REACH_SAFETY;
+		double reach = interactionRange - safety;
 		return box.contains(eye)
 			|| box.clip(eye, eye.add(look.scale(reach))).isPresent();
 	}
@@ -235,13 +247,6 @@ public final class Engagement
 	 */
 	public boolean shieldFacingUs(int i)
 	{
-		if(!state.target().shieldRaised())
-			return false;
-		
-		float yaw = state.target().headYaw() * Mth.DEG_TO_RAD;
-		Vec3 view = new Vec3(-Mth.sin(yaw), 0, Mth.cos(yaw));
-		Vec3 toUs = selfPos[i].subtract(targetPos[i]);
-		toUs = new Vec3(toUs.x, 0, toUs.z).normalize();
-		return Math.acos(toUs.dot(view)) <= Math.PI / 2 + 1e-6;
+		return state.target().withPos(targetPos[i]).blocks(selfPos[i]);
 	}
 }

@@ -24,6 +24,7 @@ import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemCooldowns;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -64,6 +65,58 @@ public final class Kit
 		this.cooldowns = Map.copyOf(cooldowns);
 		this.baseAttackSpeed = baseAttackSpeed;
 		this.baseAttackDamage = baseAttackDamage;
+	}
+	
+	/** The same kit with a different slot selected. */
+	public Kit withSelected(int slot)
+	{
+		return new Kit(slots, slot, cooldowns, baseAttackSpeed,
+			baseAttackDamage);
+	}
+	
+	/**
+	 * The same kit after using up one item from {@code slot}, which starts
+	 * its cooldown.
+	 */
+	public Kit withUsed(int slot, int cooldown)
+	{
+		ArrayList<ItemStack> newSlots = new ArrayList<>(slots);
+		ItemStack used = get(slot).copy();
+		used.shrink(1);
+		newSlots.set(slot, used);
+		
+		HashMap<Identifier, Integer> newCooldowns = new HashMap<>(cooldowns);
+		newCooldowns.put(cooldownGroup(get(slot)), cooldown);
+		return new Kit(newSlots, selected, newCooldowns, baseAttackSpeed,
+			baseAttackDamage);
+	}
+	
+	/**
+	 * This kit, with the remaining ticks of the cooldowns that both kits
+	 * have taken from {@code predicted}.
+	 */
+	public Kit withCooldownsFrom(Kit predicted)
+	{
+		HashMap<Identifier, Integer> merged = new HashMap<>(cooldowns);
+		merged.replaceAll(
+			(group, ticks) -> predicted.cooldowns.getOrDefault(group, ticks));
+		return new Kit(slots, selected, merged, baseAttackSpeed,
+			baseAttackDamage);
+	}
+	
+	/** The same kit one tick later. */
+	public Kit withCooldownsTicked()
+	{
+		if(cooldowns.isEmpty())
+			return this;
+		
+		HashMap<Identifier, Integer> newCooldowns = new HashMap<>();
+		cooldowns.forEach((group, ticks) -> {
+			if(ticks > 1)
+				newCooldowns.put(group, ticks - 1);
+		});
+		return new Kit(slots, selected, newCooldowns, baseAttackSpeed,
+			baseAttackDamage);
 	}
 	
 	/** A snapshot of the local player's hotbar. */
@@ -119,8 +172,22 @@ public final class Kit
 	/** Ticks until {@code stack} can be used again, 0 if it is ready. */
 	public int cooldown(ItemStack stack)
 	{
-		Identifier group = MC.player.getCooldowns().getCooldownGroup(stack);
-		return cooldowns.getOrDefault(group, 0);
+		return cooldowns.getOrDefault(cooldownGroup(stack), 0);
+	}
+	
+	/** {@code ItemCooldowns.getCooldownGroup()}, which ignores its state. */
+	private static Identifier cooldownGroup(ItemStack stack)
+	{
+		return MC.player.getCooldowns().getCooldownGroup(stack);
+	}
+	
+	/** The cooldown of the first slot holding {@code item}, or 0. */
+	public int cooldownOf(Item item)
+	{
+		for(ItemStack stack : slots)
+			if(stack.is(item))
+				return cooldown(stack);
+		return 0;
 	}
 	
 	public boolean isReady(ItemStack stack)
