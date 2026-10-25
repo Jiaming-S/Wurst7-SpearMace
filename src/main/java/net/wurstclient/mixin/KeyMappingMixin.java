@@ -29,6 +29,9 @@ public abstract class KeyMappingMixin implements IKeyMapping
 	@Shadow
 	private InputConstants.Key key;
 	
+	@Shadow
+	private int clickCount;
+	
 	@Override
 	@Unique
 	@Deprecated // use IKeyMapping.isActuallyDown() instead
@@ -76,6 +79,14 @@ public abstract class KeyMappingMixin implements IKeyMapping
 			System.out.println("Unknown key mapping type: " + key.getType());
 			break;
 		}
+	}
+	
+	@Override
+	@Unique
+	@Deprecated // use IKeyMapping.simulateClick() instead
+	public void wurst_simulateClick()
+	{
+		clickCount++;
 	}
 	
 	@Override

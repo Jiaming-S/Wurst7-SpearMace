@@ -39,6 +39,16 @@ public interface IKeyMapping
 		wurst_simulatePress(pressed);
 	}
 	
+	/**
+	 * Registers one click of this key, the same way a real key press does,
+	 * but without going through the keyboard or mouse handler. The click is
+	 * consumed the next time the game handles its keybinds.
+	 */
+	public default void simulateClick()
+	{
+		wurst_simulateClick();
+	}
+	
 	public default void setDown(boolean down)
 	{
 		asVanilla().setDown(down);
@@ -74,4 +84,10 @@ public interface IKeyMapping
 	 */
 	@Deprecated
 	public void wurst_simulatePress(boolean pressed);
+	
+	/**
+	 * @deprecated Use {@link #simulateClick()} instead.
+	 */
+	@Deprecated
+	public void wurst_simulateClick();
 }

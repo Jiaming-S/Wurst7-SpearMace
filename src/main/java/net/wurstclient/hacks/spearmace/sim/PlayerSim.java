@@ -1,0 +1,147 @@
+/*
+ * Copyright (c) 2014-2026 Wurst-Imperium and contributors.
+ *
+ * This source code is subject to the terms of the GNU General Public
+ * License, version 3. If a copy of the GPL was not distributed with this
+ * file, You can obtain one at: https://www.gnu.org/licenses/gpl-3.0.txt
+ */
+package net.wurstclient.hacks.spearmace.sim;
+
+import java.util.List;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.wurstclient.WurstClient;
+
+/**
+ * Tick-exact model of the local player's own movement
+ * ({@code LivingEntity.aiStep()} and {@code travelInAir()}), without fluids,
+ * effects or step-up. One {@link #step()} is one client tick.
+ */
+public final class PlayerSim
+{
+	private static final Minecraft MC = WurstClient.MC;
+	
+	public static final double GRAVITY = 0.08;
+	public static final double VERTICAL_DRAG = 0.98;
+	public static final double AIR_FRICTION = 0.91;
+	public static final double EYE_HEIGHT = 1.62;
+	public static final double HALF_WIDTH = 0.3;
+	public static final double HEIGHT = 1.8;
+	
+	private final Level level;
+	
+	public Vec3 pos;
+	public Vec3 vel;
+	public boolean onGround;
+	
+	/** Movement input: yaw of the forward key, if it is held. */
+	public float yaw;
+	public boolean forward;
+	public boolean sprinting;
+	public boolean jump;
+	
+	public PlayerSim(Level level, Vec3 pos, Vec3 vel, boolean onGround)
+	{
+		this.level = level;
+		this.pos = pos;
+		this.vel = vel;
+		this.onGround = onGround;
+	}
+	
+	/** Copies the local player, including the keys it is holding. */
+	public static PlayerSim ofLocalPlayer()
+	{
+		PlayerSim sim = new PlayerSim(MC.level, MC.player.position(),
+			MC.player.getDeltaMovement(), MC.player.onGround());
+		sim.yaw = MC.player.getYRot();
+		sim.forward = MC.options.keyUp.isDown();
+		sim.sprinting = MC.player.isSprinting();
+		sim.jump = MC.options.keyJump.isDown();
+		return sim;
+	}
+	
+	public PlayerSim copy()
+	{
+		PlayerSim sim = new PlayerSim(level, pos, vel, onGround);
+		sim.yaw = yaw;
+		sim.forward = forward;
+		sim.sprinting = sprinting;
+		sim.jump = jump;
+		return sim;
+	}
+	
+	public void step()
+	{
+		// LivingEntity.aiStep(): tiny velocities are dropped
+		double vx = Math.abs(vel.x) < 0.003 ? 0 : vel.x;
+		double vy = Math.abs(vel.y) < 0.003 ? 0 : vel.y;
+		double vz = Math.abs(vel.z) < 0.003 ? 0 : vel.z;
+		vel = new Vec3(vx, vy, vz);
+		
+		if(jump && onGround)
+		{
+			vel = new Vec3(vel.x, 0.42, vel.z);
+			if(sprinting)
+			{
+				float rad = yaw * Mth.DEG_TO_RAD;
+				vel = vel.add(-Mth.sin(rad) * 0.2, 0, Mth.cos(rad) * 0.2);
+			}
+		}
+		
+		float blockFriction = onGround ? getBlockFriction() : 1;
+		if(forward)
+		{
+			float speed;
+			if(onGround)
+				speed = (sprinting ? 0.13F : 0.1F) * (0.21600002F
+					/ (blockFriction * blockFriction * blockFriction));
+			else
+				speed = sprinting ? 0.025999999F : 0.02F;
+			
+			// input is scaled by 0.98 in aiStep(), then moveRelative()
+			float rad = yaw * Mth.DEG_TO_RAD;
+			double accel = 0.98F * speed;
+			vel = vel.add(-Mth.sin(rad) * accel, 0, Mth.cos(rad) * accel);
+		}
+		
+		Vec3 move = Entity.collideBoundingBox(MC.player, vel, box(pos), level,
+			List.of());
+		boolean collidedY = move.y != vel.y;
+		onGround = collidedY && vel.y < 0;
+		pos = pos.add(move);
+		vel = new Vec3(move.x != vel.x ? 0 : vel.x, collidedY ? 0 : vel.y,
+			move.z != vel.z ? 0 : vel.z);
+		
+		double friction = blockFriction * AIR_FRICTION;
+		vel = new Vec3(vel.x * friction, (vel.y - GRAVITY) * VERTICAL_DRAG,
+			vel.z * friction);
+	}
+	
+	private float getBlockFriction()
+	{
+		BlockPos below = BlockPos.containing(pos.x, pos.y - 0.5000001, pos.z);
+		return level.getBlockState(below).getBlock().getFriction();
+	}
+	
+	public Vec3 eyePos()
+	{
+		return pos.add(0, EYE_HEIGHT, 0);
+	}
+	
+	public AABB box()
+	{
+		return box(pos);
+	}
+	
+	public static AABB box(Vec3 feet)
+	{
+		return new AABB(feet.x - HALF_WIDTH, feet.y, feet.z - HALF_WIDTH,
+			feet.x + HALF_WIDTH, feet.y + HEIGHT, feet.z + HALF_WIDTH);
+	}
+}
