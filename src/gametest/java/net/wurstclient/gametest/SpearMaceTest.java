@@ -12,6 +12,7 @@ import static net.wurstclient.gametest.WurstClientTestHelper.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import org.slf4j.Logger;
 
@@ -66,6 +67,13 @@ import net.wurstclient.hacks.spearmace.model.Replay.Report;
 import net.wurstclient.hacks.spearmace.model.Replay.StepError;
 import net.wurstclient.hacks.spearmace.model.TargetModel;
 import net.wurstclient.hacks.spearmace.model.TickSim;
+import net.wurstclient.hacks.spearmace.plan.DefaultController;
+import net.wurstclient.hacks.spearmace.plan.Options;
+import net.wurstclient.hacks.spearmace.plan.Planner;
+import net.wurstclient.hacks.spearmace.plan.Runner;
+import net.wurstclient.hacks.spearmace.plan.Runner.Entry;
+import net.wurstclient.hacks.spearmace.plan.eval.DamageRace;
+import net.wurstclient.hacks.spearmace.plan.search.RuleSearch;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.TargetSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
@@ -668,6 +676,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		testBelowUnreachable(context, server, failures);
 		testStunSlam(context, server, failures);
 		testCombatChain(context, server, failures);
+		testPlannerChain(context, server, failures);
 	}
 	
 	private void testStrikeFromAbove(ClientGameTestContext context,
@@ -884,6 +893,98 @@ public final class SpearMaceTest implements FabricClientGameTest
 			results.get(1).payload(Engaged.class).decision(),
 			results.get(2).payload(Engaged.class).decision(),
 			fmt(initialHealth - targetHealth));
+	}
+	
+	/**
+	 * Same start as {@link #testCombatChain}, but nothing is queued: the
+	 * planner has to find the launch, the strike, and the strike after
+	 * the Wind Burst relaunch on its own.
+	 */
+	private void testPlannerChain(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Planner chain";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		List<Entry> history = runPlanner(context, name, 300, h -> h.stream()
+			.filter(e -> e.payload(Struck.class) != null).count() >= 2);
+		
+		List<Struck> strikes = history.stream()
+			.map(e -> e.payload(Struck.class)).filter(s -> s != null).toList();
+		double predicted =
+			strikes.stream().mapToDouble(s -> s.option().damage()).sum();
+		double damage = initialHealth - targetHealth;
+		LOGGER.info("SM: {} {} strikes, damage actual={} predicted={}", name,
+			strikes.size(), fmt(damage), fmt(predicted));
+		
+		if(history.isEmpty()
+			|| !history.getFirst().name().startsWith("WindChargeJump"))
+			failures.add(name + ": didn't start with a launch: " + history);
+		if(strikes.size() < 2)
+			failures.add(
+				name + ": only " + strikes.size() + " strikes: " + history);
+		if(Math.abs(damage - predicted) > Math.max(1.5, 0.05 * predicted))
+			failures.add(name + ": dealt " + fmt(damage) + " damage, predicted "
+				+ fmt(predicted));
+	}
+	
+	/**
+	 * Lets the planner fight the watched target until {@code done} accepts
+	 * the history or {@code maxTicks} pass, logging every tick.
+	 */
+	private List<Entry> runPlanner(ClientGameTestContext context, String name,
+		int maxTicks, Predicate<List<Entry>> done)
+	{
+		Recorder recorder =
+			new Recorder(() -> targetId >= 0 ? clientEntity(targetId) : null);
+		Runner[] planRunner = new Runner[1];
+		context.runOnClient(mc -> {
+			Planner planner = new Planner(TargetModel.ballistic(),
+				new Options(), new DefaultController(), new RuleSearch(),
+				new DamageRace(), 5);
+			planRunner[0] = new Runner(
+				() -> targetId >= 0 ? clientEntity(targetId) : null, planner);
+			planRunner[0].start();
+			recorder.start();
+		});
+		
+		for(int tick = 0; tick < maxTicks; tick++)
+		{
+			context.waitTick();
+			int t = tick;
+			logServerProjectiles(name, t);
+			boolean finished = context.computeOnClient(mc -> {
+				LOGGER.info(String.format(
+					"SM [%s t%d] pos=%s vel=%s rot=(%.1f, %.1f) slot=%d ground=%s%s",
+					name, t, fmt(mc.player.position()),
+					fmt(mc.player.getDeltaMovement()), mc.player.getYRot(),
+					mc.player.getXRot(),
+					mc.player.getInventory().getSelectedSlot(),
+					mc.player.onGround(), describeClientTarget()));
+				return done.test(planRunner[0].history());
+			});
+			if(finished)
+				break;
+		}
+		
+		// let the last hit's damage reach the server log
+		context.waitTicks(2);
+		logServerProjectiles(name, maxTicks);
+		return context.computeOnClient(mc -> {
+			Runner r = planRunner[0];
+			r.stop();
+			recorder.stop();
+			lastFrames = recorder.frames();
+			replay(mc, name, lastFrames);
+			LOGGER.info("SM: {} {} replans, history {}", name, r.replans(),
+				r.history());
+			return r.history();
+		});
 	}
 	
 	/**

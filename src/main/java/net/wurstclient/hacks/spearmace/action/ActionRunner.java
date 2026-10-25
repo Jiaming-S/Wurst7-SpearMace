@@ -27,9 +27,7 @@ import net.wurstclient.hacks.spearmace.action.Step.Failed;
 import net.wurstclient.hacks.spearmace.action.Step.Run;
 import net.wurstclient.hacks.spearmace.input.KeyInput;
 import net.wurstclient.hacks.spearmace.model.Observer;
-import net.wurstclient.hacks.spearmace.model.TargetModel;
-import net.wurstclient.hacks.spearmace.model.TickInput;
-import net.wurstclient.hacks.spearmace.model.TickSim;
+import net.wurstclient.hacks.spearmace.model.Tracker;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.viz.Preview;
 
@@ -54,8 +52,8 @@ public final class ActionRunner implements UpdateListener
 	private final ArrayDeque<Queued> queue = new ArrayDeque<>();
 	private final ArrayList<Result> results = new ArrayList<>();
 	
+	private final Tracker tracker = new Tracker();
 	private GameState observed;
-	private TickInput lastInput;
 	
 	private String name;
 	private Action current;
@@ -86,7 +84,7 @@ public final class ActionRunner implements UpdateListener
 			this);
 		queue.clear();
 		current = null;
-		observed = null;
+		tracker.reset();
 	}
 	
 	public void enqueue(Action action, StartCondition condition)
@@ -128,26 +126,10 @@ public final class ActionRunner implements UpdateListener
 	public void onUpdate()
 	{
 		tick++;
-		observed = observe();
+		observed = tracker.observe(target.get());
 		if(current != null || startNext())
 			run();
-		lastInput = KeyInput.thisUpdate();
-	}
-	
-	/** The captured state, plus what the model knows that the client can't. */
-	private GameState observe()
-	{
-		GameState captured = GameState.capture(target.get());
-		GameState predicted = null;
-		if(observed != null
-			&& captured.self().tick() == observed.self().tick() + 1)
-			predicted = sim().step(observed, lastInput).next();
-		return Observer.observe(captured, predicted);
-	}
-	
-	private static TickSim sim()
-	{
-		return new TickSim(MC.level, TargetModel.ballistic());
+		tracker.endUpdate();
 	}
 	
 	private boolean startNext()
@@ -161,7 +143,8 @@ public final class ActionRunner implements UpdateListener
 		name = action.name();
 		startTick = tick;
 		startPos = observed.self().pos();
-		Rollout rollout = Rollout.of(sim(), observed, action, MAX_ROLLOUT);
+		Rollout rollout =
+			Rollout.of(Tracker.sim(), observed, action, MAX_ROLLOUT);
 		prediction = rollout.prediction();
 		Preview.show(name, observed, rollout.steps());
 		LOGGER.info("[{}] start {} at {}, predicted {}", tick, name,

@@ -181,7 +181,8 @@ public record SpearLunge(float yaw, float pitch) implements Action
 					new Vec3(push.x, 0, push.z), stab.attempts()));
 			
 			if(self.tick() - stab.stabTick() <= CONFIRM_TIMEOUT)
-				return Step.idle(new Confirm(stab, self));
+				return Step.idle(new Confirm(stab, self))
+					.holding(Channel.HOTBAR);
 			
 			if(stab.attempts() >= MAX_ATTEMPTS)
 				return Step.fail(

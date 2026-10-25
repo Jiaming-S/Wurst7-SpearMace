@@ -12,6 +12,7 @@ import java.util.Set;
 
 import net.wurstclient.hacks.spearmace.model.TickInput;
 import net.wurstclient.hacks.spearmace.state.SelfState;
+import net.wurstclient.util.Rotation;
 
 /** What an {@link Action} does at one update. */
 public sealed interface Step
@@ -50,6 +51,13 @@ public sealed interface Step
 		{
 			return new Run(input.withSlot(slot), claims, committed, then)
 				.holding(Channel.HOTBAR);
+		}
+		
+		/** Also looks this way. */
+		public Run withRotation(Rotation rotation)
+		{
+			return new Run(input.withRotation(rotation), claims, committed,
+				then).holding(Channel.AIM);
 		}
 		
 		public Run withThen(Action next)

@@ -9,6 +9,7 @@ package net.wurstclient.hacks.spearmace.action;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiPredicate;
 
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.hacks.spearmace.action.Step.Failed;
@@ -36,6 +37,26 @@ public record Rollout(GameState start, Step first, List<Transition> steps,
 	public static Rollout of(TickSim sim, GameState start, Action action,
 		int maxTicks)
 	{
+		return of(sim, start, action, maxTicks, Controller.NONE);
+	}
+	
+	/** With {@code controller} filling the unclaimed channels. */
+	public static Rollout of(TickSim sim, GameState start, Action action,
+		int maxTicks, Controller controller)
+	{
+		return of(sim, start, action, maxTicks, controller, (a, b) -> false);
+	}
+	
+	/**
+	 * Also stops at the first decision point, a pair of consecutive states
+	 * that {@code decisionPoint} accepts, unless the action is committed.
+	 * The action then gets one more look at the state, so that it can say
+	 * it is done or has failed; otherwise {@link #end()} is {@code null}.
+	 */
+	public static Rollout of(TickSim sim, GameState start, Action action,
+		int maxTicks, Controller controller,
+		BiPredicate<GameState, GameState> decisionPoint)
+	{
 		ArrayList<Transition> steps = new ArrayList<>();
 		GameState state = start;
 		Step first = null;
@@ -48,13 +69,27 @@ public record Rollout(GameState start, Step first, List<Transition> steps,
 			if(!(step instanceof Run run))
 				return new Rollout(start, first, steps, step, chance);
 			
+			run = controller.fill(state, run);
 			Transition t = sim.step(state, run.merged(state.self()));
 			steps.add(t);
+			GameState before = state;
 			state = t.next();
 			action = run.then();
 			chance = Math.min(chance, action.chance());
+			
+			if(!run.committed() && decisionPoint.test(before, state))
+			{
+				Step look = action.next(sim.level(), state);
+				return new Rollout(start, first, steps,
+					look instanceof Run ? null : look, chance);
+			}
 		}
 		return new Rollout(start, first, steps, null, chance);
+	}
+	
+	public boolean failed()
+	{
+		return end instanceof Failed;
 	}
 	
 	public GameState last()
