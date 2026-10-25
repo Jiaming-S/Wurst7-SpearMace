@@ -7,15 +7,17 @@
  */
 package net.wurstclient.hacks.spearmace.maneuver;
 
-import java.util.ArrayList;
-
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import net.wurstclient.WurstClient;
-import net.wurstclient.hacks.spearmace.input.KeyInput;
+import net.wurstclient.hacks.spearmace.action.Action;
+import net.wurstclient.hacks.spearmace.action.Channel;
+import net.wurstclient.hacks.spearmace.action.Step;
+import net.wurstclient.hacks.spearmace.model.TickInput;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
+import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.state.Kit;
+import net.wurstclient.hacks.spearmace.state.SelfState;
 import net.wurstclient.util.Rotation;
 
 /**
@@ -31,10 +33,8 @@ import net.wurstclient.util.Rotation;
  * pushes the player horizontally by {@code 0.458 * level * cos(pitch)}
  * along the view direction: flat looks lunge the furthest.
  */
-public final class SpearLunge implements Maneuver
+public record SpearLunge(float yaw, float pitch) implements Action
 {
-	private static final Minecraft MC = WurstClient.MC;
-	
 	public static final float IMPULSE_PER_LEVEL = 0.458F;
 	
 	/**
@@ -54,25 +54,14 @@ public final class SpearLunge implements Maneuver
 	 */
 	private static final int MAX_ATTEMPTS = 3;
 	
-	private final float yaw;
-	private final float pitch;
-	
-	private Phase phase = Phase.START;
-	private String failureReason;
-	private int spearSlot;
-	private int handSlot;
-	private long waitStart;
-	private long stabTick;
-	private int attempts;
-	private Vec3 impulse;
-	private Vec3 measured;
-	private PlayerSim shadow;
-	
-	public SpearLunge(float yaw, float pitch)
-	{
-		this.yaw = yaw;
-		this.pitch = pitch;
-	}
+	/**
+	 * What the lunge did.
+	 *
+	 * @param measured
+	 *            the horizontal push that really happened
+	 */
+	public record Lunged(Vec3 expected, Vec3 measured, int attempts)
+	{}
 	
 	@Override
 	public String name()
@@ -88,194 +77,119 @@ public final class SpearLunge implements Maneuver
 	}
 	
 	@Override
-	public Prediction predict()
+	public Step next(Level level, GameState s)
 	{
-		String reason = checkPreconditions();
+		SelfState self = s.self();
+		String reason = checkPreconditions(self);
 		if(reason != null)
-			return Prediction.infeasible(reason);
+			return Step.fail(reason);
 		
-		int level = Hotbar.lungeLevel(Hotbar.get(Hotbar.lungeSpear()));
-		int wait = ticksUntilStab();
-		if(wait > MAX_WAIT)
-			return Prediction.infeasible("attack charge takes too long");
-		
-		PlayerSim sim = PlayerSim.ofLocalPlayer();
-		ArrayList<Vec3> path = new ArrayList<>();
-		path.add(sim.pos);
-		for(int i = 0; i < wait; i++)
-		{
-			sim.step();
-			path.add(sim.pos);
-		}
-		
-		sim.yaw = yaw;
-		for(int i = 0; i < IMPULSE_DELAY; i++)
-		{
-			sim.step();
-			path.add(sim.pos);
-		}
-		sim.vel = sim.vel.add(impulse(yaw, pitch, level));
-		return Prediction.of(path, sim.vel, 1);
+		Kit kit = self.kit();
+		Wait wait =
+			new Wait(this, kit.lungeSpear(), kit.hand(), self.tick(), 0);
+		if(kit.selected() != wait.handSlot())
+			return Step.idle(wait).withSlot(wait.handSlot());
+		return wait.next(level, s);
 	}
 	
-	/** Updates until the attack click can be queued. */
-	private int ticksUntilStab()
+	private static String checkPreconditions(SelfState self)
 	{
-		ItemStack spear = Hotbar.get(Hotbar.lungeSpear());
-		if(Hotbar.selected() == Hotbar.hand())
-			return KeyInput.ticksUntilAttack(spear);
-			
-		// the switch resets the attack charge one tick later, then it has to
-		// fill up again for the hand item (5 ticks for attack speed 4)
-		float delay = 1 / 4F * 20;
-		return 1 + (int)Math.ceil(delay);
-	}
-	
-	private String checkPreconditions()
-	{
-		LocalPlayer player = MC.player;
-		if(Hotbar.lungeSpear() < 0)
+		if(self.kit().lungeSpear() < 0)
 			return "no spear with Lunge";
-		if(Hotbar.hand() < 0)
+		if(self.kit().hand() < 0)
 			return "no hotbar slot without a weapon or tool";
-		if(player.isPassenger())
-			return "riding";
-		if(player.isFallFlying())
+		if(self.fallFlying())
 			return "gliding";
-		if(player.isInWater())
-			return "in water";
-		if(!player.isCreative() && player.getFoodData().getFoodLevel() < 7)
-			return "too hungry";
 		return null;
 	}
 	
-	@Override
-	public Status tick(long tick)
+	/** Holding the hand slot until its attack charge allows the jab. */
+	private record Wait(SpearLunge lunge, int spearSlot, int handSlot,
+		int since, int attempts) implements Action
 	{
-		return switch(phase)
+		@Override
+		public String name()
 		{
-			case START -> start(tick);
-			case WAIT -> waitForCharge(tick);
-			case STABBED -> swapBack(tick);
-			case CONFIRM -> confirm(tick);
-		};
-	}
-	
-	private Status start(long tick)
-	{
-		failureReason = checkPreconditions();
-		if(failureReason != null)
-			return Status.FAILED;
-		
-		spearSlot = Hotbar.lungeSpear();
-		handSlot = Hotbar.hand();
-		waitStart = tick;
-		phase = Phase.WAIT;
-		
-		if(Hotbar.selected() != handSlot)
-		{
-			KeyInput.selectSlot(handSlot);
-			return Status.RUNNING;
+			return lunge.name();
 		}
 		
-		return waitForCharge(tick);
-	}
-	
-	private Status waitForCharge(long tick)
-	{
-		if(tick - waitStart > MAX_WAIT)
-			return fail("attack charge never filled up");
-		
-		ItemStack spear = Hotbar.get(spearSlot);
-		if(Hotbar.selected() != handSlot || !KeyInput.canAttackNextTick(spear))
-			return Status.RUNNING;
-		
-		failureReason = checkPreconditions();
-		if(failureReason != null)
-			return Status.FAILED;
-		
-		KeyInput.look(new Rotation(yaw, pitch));
-		KeyInput.selectSlot(spearSlot);
-		KeyInput.clickAttack();
-		
-		stabTick = tick;
-		attempts++;
-		impulse = impulse(yaw, pitch, Hotbar.lungeLevel(spear));
-		shadow = PlayerSim.ofLocalPlayer();
-		phase = Phase.STABBED;
-		return Status.RUNNING;
-	}
-	
-	private Status swapBack(long tick)
-	{
-		// handleKeybinds() has switched to the spear and stabbed by now
-		if(Hotbar.selected() != spearSlot)
-			return fail("hotbar didn't switch to the spear");
-		
-		KeyInput.selectSlot(handSlot);
-		phase = Phase.CONFIRM;
-		return confirm(tick);
-	}
-	
-	private Status confirm(long tick)
-	{
-		// compare with where the player would be without the lunge
-		shadow.step();
-		Vec3 diff = MC.player.getDeltaMovement().subtract(shadow.vel);
-		shadow = PlayerSim.ofLocalPlayer();
-		
-		Vec3 dir = impulse.normalize();
-		if(diff.dot(dir) >= 0.6 * impulse.length())
+		@Override
+		public Step next(Level level, GameState s)
 		{
-			measured = new Vec3(diff.x, 0, diff.z);
-			return Status.DONE;
-		}
-		
-		if(tick - stabTick > CONFIRM_TIMEOUT)
-		{
-			if(attempts >= MAX_ATTEMPTS)
-				return fail("no lunge impulse after " + attempts + " attempts");
+			SelfState self = s.self();
+			if(self.tick() - since > MAX_WAIT)
+				return Step.fail("attack charge never filled up");
 			
-			waitStart = tick;
-			phase = Phase.WAIT;
+			ItemStack spear = self.kit().get(spearSlot);
+			if(self.kit().selected() != handSlot
+				|| !self.canAttackNextTick(spear))
+				return Step.idle(this).holding(Channel.HOTBAR);
+			
+			String reason = checkPreconditions(self);
+			if(reason != null)
+				return Step.fail(reason);
+			
+			Vec3 impulse =
+				impulse(lunge.yaw(), lunge.pitch(), Hotbar.lungeLevel(spear));
+			TickInput jab = TickInput.NONE
+				.withRotation(new Rotation(lunge.yaw(), lunge.pitch()))
+				.withSlot(spearSlot).withAttack();
+			return Step.run(jab,
+				new Stabbed(this, self.tick(), attempts + 1, impulse));
+		}
+	}
+	
+	/** Jabbed, switching back to the hand slot. */
+	private record Stabbed(Wait waited, int stabTick, int attempts,
+		Vec3 impulse) implements Action
+	{
+		@Override
+		public String name()
+		{
+			return waited.name();
 		}
 		
-		return Status.RUNNING;
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			// handleKeybinds() has switched to the spear and stabbed by now
+			if(s.self().kit().selected() != waited.spearSlot())
+				return Step.fail("hotbar didn't switch to the spear");
+			
+			return Step.idle(new Confirm(this, s.self()))
+				.withSlot(waited.handSlot());
+		}
 	}
 	
-	/** The horizontal push that actually happened, or {@code null}. */
-	public Vec3 measuredImpulse()
+	/** Waiting for the server's push. */
+	private record Confirm(Stabbed stab, SelfState last) implements Action
 	{
-		return measured;
-	}
-	
-	public Vec3 expectedImpulse()
-	{
-		return impulse;
-	}
-	
-	public int attempts()
-	{
-		return attempts;
-	}
-	
-	private Status fail(String reason)
-	{
-		failureReason = reason;
-		return Status.FAILED;
-	}
-	
-	@Override
-	public String failureReason()
-	{
-		return failureReason;
-	}
-	
-	private enum Phase
-	{
-		START,
-		WAIT,
-		STABBED,
-		CONFIRM;
+		@Override
+		public String name()
+		{
+			return stab.name();
+		}
+		
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			SelfState self = s.self();
+			Vec3 impulse = stab.impulse();
+			Vec3 push = PlayerSim.push(level, last, self);
+			if(push.dot(impulse.normalize()) >= 0.6 * impulse.length())
+				return Step.done(new Lunged(impulse,
+					new Vec3(push.x, 0, push.z), stab.attempts()));
+			
+			if(self.tick() - stab.stabTick() <= CONFIRM_TIMEOUT)
+				return Step.idle(new Confirm(stab, self));
+			
+			if(stab.attempts() >= MAX_ATTEMPTS)
+				return Step.fail(
+					"no lunge impulse after " + stab.attempts() + " attempts");
+			Wait wait = stab.waited();
+			return Step.idle(new Wait(wait.lunge(), wait.spearSlot(),
+				wait.handSlot(), self.tick(), stab.attempts()))
+				.holding(Channel.HOTBAR);
+		}
 	}
 }

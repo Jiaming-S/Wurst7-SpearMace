@@ -7,16 +7,19 @@
  */
 package net.wurstclient.hacks.spearmace.input;
 
+import java.util.Set;
+
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.item.ItemStack;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.action.Channel;
 import net.wurstclient.hacks.spearmace.model.TickInput;
 import net.wurstclient.mixinterface.IKeyMapping;
 import net.wurstclient.util.Rotation;
 
 /**
- * The only way maneuvers control the player: real view rotation plus
+ * The only way actions control the player: real view rotation plus
  * simulated key clicks and held keys, just like a human would use them.
  *
  * <p>
@@ -84,12 +87,40 @@ public enum KeyInput
 		clickedUse = false;
 	}
 	
-	public static void holdJump(boolean held)
+	/**
+	 * Presses an action's input on the channels it claims. Clicks are
+	 * always pressed, held keys and the view only where claimed.
+	 */
+	public static void apply(TickInput input, Set<Channel> claims)
+	{
+		if(claims.contains(Channel.AIM) && input.rotation() != null)
+			look(input.rotation());
+		if(claims.contains(Channel.MOVE))
+		{
+			hold(MC.options.keyUp, input.forward());
+			hold(MC.options.keySprint, input.sprint());
+		}
+		if(claims.contains(Channel.JUMP))
+			holdJump(input.jump());
+		if(input.slot() >= 0)
+			selectSlot(input.slot());
+		if(input.attack())
+			clickAttack();
+		if(input.use())
+			clickUse();
+	}
+	
+	private static void hold(KeyMapping key, boolean held)
 	{
 		if(held)
-			MC.options.keyJump.setDown(true);
+			key.setDown(true);
 		else
-			IKeyMapping.get(MC.options.keyJump).resetDownState();
+			IKeyMapping.get(key).resetDownState();
+	}
+	
+	public static void holdJump(boolean held)
+	{
+		hold(MC.options.keyJump, held);
 	}
 	
 	public static void look(Rotation rotation)

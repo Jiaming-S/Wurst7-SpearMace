@@ -5,18 +5,19 @@
  * License, version 3. If a copy of the GPL was not distributed with this
  * file, You can obtain one at: https://www.gnu.org/licenses/gpl-3.0.txt
  */
-package net.wurstclient.hacks.spearmace.maneuver;
+package net.wurstclient.hacks.spearmace.action;
 
 import java.util.List;
 
 import net.minecraft.world.phys.Vec3;
 
 /**
- * What a maneuver expects to happen if it starts at the current tick.
+ * What an action is expected to do if it starts at the current update,
+ * as worked out by its {@link Rollout}.
  *
  * @param path
  *            the player's feet at each update, starting with the current one
- *            and ending when the maneuver is done
+ *            and ending when the action is done
  * @param endVel
  *            the player's velocity at the end of {@code path}
  * @param pSuccess
@@ -56,7 +57,7 @@ public record Prediction(boolean feasible, String reason, List<Vec3> path,
 			fmt(endVel), ticks(), pSuccess);
 	}
 	
-	static String fmt(Vec3 v)
+	public static String fmt(Vec3 v)
 	{
 		return v == null ? "null"
 			: String.format("(%.2f, %.2f, %.2f)", v.x, v.y, v.z);

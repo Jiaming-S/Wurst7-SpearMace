@@ -7,23 +7,22 @@
  */
 package net.wurstclient.hacks.spearmace.combat;
 
-import java.util.ArrayList;
-
-import net.minecraft.client.Minecraft;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.action.Action;
+import net.wurstclient.hacks.spearmace.action.Channel;
+import net.wurstclient.hacks.spearmace.action.Step;
+import net.wurstclient.hacks.spearmace.action.Step.Run;
 import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
-import net.wurstclient.hacks.spearmace.input.KeyInput;
-import net.wurstclient.hacks.spearmace.maneuver.Hotbar;
-import net.wurstclient.hacks.spearmace.maneuver.Maneuver;
-import net.wurstclient.hacks.spearmace.maneuver.Prediction;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
+import net.wurstclient.hacks.spearmace.model.TickInput;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.StrikeModel;
 import net.wurstclient.hacks.spearmace.sim.WindBurst;
+import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.state.Kit;
+import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
  * An attribute-swapped mace hit while falling onto (or past) a target:
@@ -34,10 +33,8 @@ import net.wurstclient.hacks.spearmace.sim.WindBurst;
  * with the mace's smash bonus and Wind Burst, which launches the player
  * back up.
  */
-public final class MaceStrike implements Maneuver
+public record MaceStrike(PreItem pre) implements Action
 {
-	private static final Minecraft MC = WurstClient.MC;
-	
 	/**
 	 * Updates between queuing the attack click and the Wind Burst launch
 	 * showing up in the player's velocity, same as {@link SpearLunge}.
@@ -48,25 +45,17 @@ public final class MaceStrike implements Maneuver
 	private static final int MAX_ATTEMPTS = 3;
 	private static final int MAX_TICKS = Engagement.HORIZON;
 	
-	private final LivingEntity target;
-	private final PreItem pre;
-	
-	private Phase phase = Phase.START;
-	private String failureReason;
-	private long startTick = -1;
-	private long strikeTick;
-	private int attempts;
-	private int preSlot;
-	private int maceSlot;
-	private StrikeOption struck;
-	private double expectedLaunch;
-	private double measuredLaunch = Double.NaN;
-	
-	public MaceStrike(LivingEntity target, PreItem pre)
-	{
-		this.target = target;
-		this.pre = pre;
-	}
+	/**
+	 * What the strike did.
+	 *
+	 * @param option
+	 *            the plan at the moment of the attack click
+	 * @param measuredLaunch
+	 *            the y velocity after the launch
+	 */
+	public record Struck(PreItem pre, StrikeOption option,
+		double expectedLaunch, double measuredLaunch, int attempts)
+	{}
 	
 	@Override
 	public String name()
@@ -75,209 +64,145 @@ public final class MaceStrike implements Maneuver
 	}
 	
 	@Override
-	public Prediction predict()
+	public Step next(Level level, GameState s)
 	{
-		String reason = checkPreconditions();
+		String reason = checkPreconditions(s);
 		if(reason != null)
-			return Prediction.infeasible(reason);
+			return Step.fail(reason);
 		
-		Engagement e = Engagement.now(target);
-		StrikeOption option = StrikeSelector.plan(e, pre);
-		if(option == null)
-			return Prediction.infeasible("no contact before landing");
-		
-		// fall until the launch arrives, then rise to the apex
-		PlayerSim sim = PlayerSim.ofLocalPlayer();
-		ArrayList<Vec3> path = new ArrayList<>();
-		path.add(sim.pos);
-		Vec3 hitPos = e.selfPos(option.update() + 1);
-		for(int i = 0; i < option.update() + LAUNCH_DELAY; i++)
-		{
-			sim.step();
-			path.add(sim.pos);
-		}
-		
-		sim.vel = new Vec3(sim.vel.x, launchVelY(hitPos), sim.vel.z);
-		sim.onGround = false;
-		for(int i = 0; i < 100 && sim.vel.y > 0; i++)
-		{
-			sim.step();
-			path.add(sim.pos);
-		}
-		return Prediction.of(path, sim.vel, 1);
+		Kit kit = s.self().kit();
+		int preSlot = kit.slotFor(pre);
+		Track track = new Track(this, preSlot, kit.mace(), s.self().tick(), 0);
+		Step step = track.next(level, s);
+		if(kit.selected() != preSlot && step instanceof Run run)
+			return run.withSlot(preSlot);
+		return step;
 	}
 	
 	/**
 	 * The player's y velocity right after a Wind Burst smash with the
 	 * player's feet at {@code feet}.
 	 */
-	public static double launchVelY(Vec3 feet)
+	public static double launchVelY(Level level, SelfState self, Vec3 feet)
 	{
-		int level =
-			Loadout.level(Hotbar.get(Loadout.mace()), Enchantments.WIND_BURST);
+		Kit kit = self.kit();
+		int windBurst =
+			Loadout.level(kit.get(kit.mace()), Enchantments.WIND_BURST);
 		double exposure =
-			WindBurst.getSeenPercent(MC.level, feet, PlayerSim.box(feet));
-		double resistance = MC.player
-			.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE);
-		return StrikeModel.windBurstVelY(level, exposure, resistance);
+			WindBurst.getSeenPercent(level, feet, PlayerSim.box(feet));
+		return StrikeModel.windBurstVelY(windBurst, exposure,
+			self.knockbackResistance());
 	}
 	
-	private String checkPreconditions()
+	private String checkPreconditions(GameState s)
 	{
-		if(Loadout.mace() < 0)
+		Kit kit = s.self().kit();
+		if(kit.mace() < 0)
 			return "no mace";
-		if(Loadout.slotFor(pre) < 0)
+		if(kit.slotFor(pre) < 0)
 			return "no " + pre.name().toLowerCase();
-		if(!target.isAlive())
+		if(!s.targetAlive())
 			return "target is dead";
-		if(MC.player.isFallFlying())
+		if(s.self().fallFlying())
 			return "gliding";
 		return null;
 	}
 	
-	@Override
-	public Status tick(long tick)
+	/** Charging the pre-item and aiming until the hit lands. */
+	private record Track(MaceStrike strike, int preSlot, int maceSlot,
+		int startTick, int attempts) implements Action
 	{
-		if(startTick < 0)
-			startTick = tick;
-		
-		return switch(phase)
+		@Override
+		public String name()
 		{
-			case START -> start(tick);
-			case TRACK -> track(tick);
-			case STRUCK -> recover(tick);
-			case CONFIRM -> confirm(tick);
-		};
-	}
-	
-	private Status start(long tick)
-	{
-		failureReason = checkPreconditions();
-		if(failureReason != null)
-			return Status.FAILED;
-		
-		preSlot = Loadout.slotFor(pre);
-		maceSlot = Loadout.mace();
-		if(Hotbar.selected() != preSlot)
-			KeyInput.selectSlot(preSlot);
-		
-		phase = Phase.TRACK;
-		return track(tick);
-	}
-	
-	private Status track(long tick)
-	{
-		if(!target.isAlive())
-			return fail("target is dead");
-		if(tick - startTick > MAX_TICKS)
-			return fail("took too long");
-		
-		Engagement e = Engagement.now(target);
-		if(e.landing() == 0)
-			return fail("landed before the hit");
-		
-		KeyInput.look(e.aim(1));
-		
-		// wait for the slot switch and for a missed click's cooldown
-		if(Hotbar.selected() != preSlot || MC.missTime > 0)
-			return Status.RUNNING;
-			
-		// predictions of the target's motion are noisy, so a missing plan
-		// isn't final until the player lands
-		StrikeOption option = StrikeSelector.plan(e, pre);
-		if(option == null && e.landing() <= 2)
-			return fail("no contact before landing: "
-				+ e.describe(Hotbar.get(preSlot), 20));
-		if(option == null || option.update() > 0)
-			return Status.RUNNING;
-		
-		KeyInput.selectSlot(maceSlot);
-		KeyInput.clickAttack();
-		struck = option;
-		strikeTick = tick;
-		attempts++;
-		expectedLaunch = launchVelY(e.selfPos(1));
-		phase = Phase.STRUCK;
-		return Status.RUNNING;
-	}
-	
-	private Status recover(long tick)
-	{
-		// handleKeybinds() has switched to the mace and attacked by now
-		if(Hotbar.selected() != maceSlot)
-			return fail("hotbar didn't switch to the mace");
-		
-		// raise the pre-item again for the next strike
-		KeyInput.selectSlot(preSlot);
-		phase = Phase.CONFIRM;
-		return confirm(tick);
-	}
-	
-	private Status confirm(long tick)
-	{
-		double velY = MC.player.getDeltaMovement().y;
-		if(velY > expectedLaunch / 2)
-		{
-			measuredLaunch = velY;
-			return Status.DONE;
+			return strike.name();
 		}
 		
-		if(tick - strikeTick > CONFIRM_TIMEOUT)
+		@Override
+		public Step next(Level level, GameState s)
 		{
-			if(attempts >= MAX_ATTEMPTS)
-				return fail(
-					"no Wind Burst launch after " + attempts + " attempts");
+			SelfState self = s.self();
+			if(!s.targetAlive())
+				return Step.fail("target is dead");
+			if(self.tick() - startTick > MAX_TICKS)
+				return Step.fail("took too long");
 			
-			phase = Phase.TRACK;
+			Engagement e = Engagement.of(level, s);
+			if(e.landing() == 0)
+				return Step.fail("landed before the hit");
+			
+			TickInput aim = TickInput.NONE.withRotation(e.aim(1));
+			Run wait = Step.run(aim, this).holding(Channel.HOTBAR);
+			
+			// wait for the slot switch and for a missed click's cooldown
+			if(self.kit().selected() != preSlot || self.missTime() > 0)
+				return wait;
+				
+			// predictions of the target's motion are noisy, so a missing
+			// plan isn't final until the player lands
+			StrikeOption option = StrikeSelector.plan(e, strike.pre());
+			if(option == null && e.landing() <= 2)
+				return Step.fail("no contact before landing: "
+					+ e.describe(self.kit().get(preSlot), 20));
+			if(option == null || option.update() > 0)
+				return wait;
+			
+			double launch = launchVelY(level, self, e.selfPos(1));
+			return Step.run(aim.withSlot(maceSlot).withAttack(),
+				new Swung(this, option, self.tick(), attempts + 1, launch));
+		}
+	}
+	
+	/** Clicked the mace and attack, raising the pre-item again. */
+	private record Swung(Track track, StrikeOption option, int strikeTick,
+		int attempts, double expectedLaunch) implements Action
+	{
+		@Override
+		public String name()
+		{
+			return track.name();
 		}
 		
-		return Status.RUNNING;
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			// handleKeybinds() has switched to the mace and attacked by now
+			if(s.self().kit().selected() != track.maceSlot())
+				return Step.fail("hotbar didn't switch to the mace");
+			
+			// raise the pre-item again for the next strike
+			return Step.idle(new Confirm(this)).withSlot(track.preSlot());
+		}
 	}
 	
-	/** The plan at the moment of the attack click, or {@code null}. */
-	public StrikeOption struck()
+	/** Waiting for the Wind Burst launch, or trying again without it. */
+	private record Confirm(Swung swung) implements Action
 	{
-		return struck;
-	}
-	
-	public double expectedLaunchVelY()
-	{
-		return expectedLaunch;
-	}
-	
-	/** The y velocity after the launch, or NaN. */
-	public double measuredLaunchVelY()
-	{
-		return measuredLaunch;
-	}
-	
-	public int attempts()
-	{
-		return attempts;
-	}
-	
-	public PreItem pre()
-	{
-		return pre;
-	}
-	
-	private Status fail(String reason)
-	{
-		failureReason = reason;
-		return Status.FAILED;
-	}
-	
-	@Override
-	public String failureReason()
-	{
-		return failureReason;
-	}
-	
-	private enum Phase
-	{
-		START,
-		TRACK,
-		STRUCK,
-		CONFIRM;
+		@Override
+		public String name()
+		{
+			return swung.name();
+		}
+		
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			SelfState self = s.self();
+			double velY = self.vel().y;
+			if(velY > swung.expectedLaunch() / 2)
+				return Step.done(
+					new Struck(swung.track().strike().pre(), swung.option(),
+						swung.expectedLaunch(), velY, swung.attempts()));
+			
+			if(self.tick() - swung.strikeTick() <= CONFIRM_TIMEOUT)
+				return Step.idle(this).holding(Channel.HOTBAR);
+			
+			if(swung.attempts() >= MAX_ATTEMPTS)
+				return Step.fail("no Wind Burst launch after "
+					+ swung.attempts() + " attempts");
+			Track t = swung.track();
+			return Step.idle(new Track(t.strike(), t.preSlot(), t.maceSlot(),
+				t.startTick(), swung.attempts())).holding(Channel.HOTBAR);
+		}
 	}
 }

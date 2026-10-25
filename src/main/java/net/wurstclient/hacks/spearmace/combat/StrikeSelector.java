@@ -10,11 +10,10 @@ package net.wurstclient.hacks.spearmace.combat;
 import java.util.ArrayList;
 import java.util.List;
 
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
-import net.wurstclient.hacks.spearmace.maneuver.Maneuver;
+import net.wurstclient.hacks.spearmace.action.Action;
 import net.wurstclient.hacks.spearmace.sim.StrikeModel;
 import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.SelfState;
@@ -51,7 +50,7 @@ public enum StrikeSelector
 	 *            the planned hit, or {@code null} for a stunslam, lunge or
 	 *            nothing
 	 */
-	public record Decision(Kind kind, Maneuver maneuver, StrikeOption option,
+	public record Decision(Kind kind, Action action, StrikeOption option,
 		String reason)
 	{
 		@Override
@@ -62,9 +61,8 @@ public enum StrikeSelector
 		}
 	}
 	
-	public static Decision decide(LivingEntity target)
+	public static Decision decide(Engagement e)
 	{
-		Engagement e = Engagement.now(target);
 		Kit kit = e.state().self().kit();
 		if(kit.mace() < 0)
 			return none("no mace");
@@ -76,7 +74,7 @@ public enum StrikeSelector
 		{
 			if(kit.axe() < 0)
 				return none("shield raised and no axe");
-			return new Decision(Kind.STUNSLAM, new StunSlam(target), null,
+			return new Decision(Kind.STUNSLAM, new StunSlam(), null,
 				"shield raised toward us");
 		}
 		
@@ -85,33 +83,32 @@ public enum StrikeSelector
 		if(above)
 		{
 			if(spear != null && spear.charged())
-				return strike(Kind.SPEARMACE, target, spear,
+				return strike(Kind.SPEARMACE, spear,
 					"spear charges before contact");
 			
 			StrikeOption sword = plan(e, PreItem.SWORD);
 			if(sword != null && sword.charged())
-				return strike(Kind.SWORDMACE, target, sword,
+				return strike(Kind.SWORDMACE, sword,
 					"sword charges before contact");
 			
 			StrikeOption hand = plan(e, PreItem.HAND);
 			if(hand != null)
-				return strike(Kind.HANDMACE, target, hand,
+				return strike(Kind.HANDMACE, hand,
 					"no time to charge a weapon");
 			
 			if(spear != null)
-				return strike(Kind.SPEARMACE, target, spear,
-					"only the spear reaches");
+				return strike(Kind.SPEARMACE, spear, "only the spear reaches");
 			
 			return none("no contact before landing");
 		}
 		
 		if(spear != null)
-			return strike(Kind.SPEARMACE, target, spear,
+			return strike(Kind.SPEARMACE, spear,
 				"below the target, but the spear reaches");
 		
 		if(kit.lungeSpear() >= 0 && kit.hand() >= 0)
-			return new Decision(Kind.ESCAPE_LUNGE, new EscapeLunge(target),
-				null, "below the target and out of reach");
+			return new Decision(Kind.ESCAPE_LUNGE, new EscapeLunge(), null,
+				"below the target and out of reach");
 		
 		return none("below the target, out of reach and no Lunge spear");
 	}
@@ -184,11 +181,10 @@ public enum StrikeSelector
 		return null;
 	}
 	
-	private static Decision strike(Kind kind, LivingEntity target,
-		StrikeOption option, String reason)
+	private static Decision strike(Kind kind, StrikeOption option,
+		String reason)
 	{
-		return new Decision(kind, new MaceStrike(target, option.pre()), option,
-			reason);
+		return new Decision(kind, new MaceStrike(option.pre()), option, reason);
 	}
 	
 	private static Decision none(String reason)

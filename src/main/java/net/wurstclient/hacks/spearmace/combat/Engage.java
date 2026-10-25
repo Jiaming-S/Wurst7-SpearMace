@@ -7,65 +7,74 @@
  */
 package net.wurstclient.hacks.spearmace.combat;
 
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.Level;
+import net.wurstclient.hacks.spearmace.action.Action;
+import net.wurstclient.hacks.spearmace.action.Step;
+import net.wurstclient.hacks.spearmace.action.Step.Done;
+import net.wurstclient.hacks.spearmace.action.Step.Failed;
+import net.wurstclient.hacks.spearmace.action.Step.Run;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Decision;
-import net.wurstclient.hacks.spearmace.maneuver.Maneuver;
-import net.wurstclient.hacks.spearmace.maneuver.Prediction;
+import net.wurstclient.hacks.spearmace.state.GameState;
 
 /**
- * Lets {@link StrikeSelector} pick the strike when this maneuver starts,
- * rather than when it is queued, then runs it.
+ * Lets {@link StrikeSelector} pick the strike when this action starts,
+ * then runs it.
  */
-public final class Engage implements Maneuver
+public record Engage() implements Action
 {
-	private final LivingEntity target;
-	private Decision decision;
-	
-	public Engage(LivingEntity target)
-	{
-		this.target = target;
-	}
+	/**
+	 * What the engagement did.
+	 *
+	 * @param result
+	 *            what the picked strike measured
+	 */
+	public record Engaged(Decision decision, Object result)
+	{}
 	
 	@Override
 	public String name()
 	{
-		return decision == null ? "Engage" : "Engage(" + decision.kind() + ")";
+		return "Engage";
 	}
 	
 	@Override
-	public Prediction predict()
+	public Step next(Level level, GameState s)
 	{
-		decision = StrikeSelector.decide(target);
-		if(decision.maneuver() == null)
-			return Prediction.infeasible(decision.reason());
+		if(!s.targetAlive())
+			return Step.fail("no target");
 		
-		return decision.maneuver().predict();
+		Decision decision = StrikeSelector.decide(Engagement.of(level, s));
+		if(decision.action() == null)
+			return Step.fail(decision.toString());
+		return new Running(decision, decision.action()).next(level, s);
 	}
 	
-	@Override
-	public Status tick(long tick)
+	/** Runs the picked strike, keeping the decision for its result. */
+	private record Running(Decision decision, Action strike) implements Action
 	{
-		if(decision == null)
-			predict();
-		if(decision.maneuver() == null)
-			return Status.FAILED;
+		@Override
+		public String name()
+		{
+			return "Engage(" + decision.kind() + ")";
+		}
 		
-		return decision.maneuver().tick(tick);
-	}
-	
-	@Override
-	public String failureReason()
-	{
-		if(decision == null)
-			return null;
-		if(decision.maneuver() == null)
-			return decision.reason();
-		return decision.maneuver().failureReason();
-	}
-	
-	/** What was picked, or {@code null} before the maneuver started. */
-	public Decision decision()
-	{
-		return decision;
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			return switch(strike.next(level, s))
+			{
+				case Run run -> run.withThen(new Running(decision, run.then()));
+				case Done done -> Step
+					.done(new Engaged(decision, done.result()));
+				case Failed failed -> Step
+					.fail(decision.kind() + ": " + failed.reason());
+			};
+		}
+		
+		@Override
+		public double chance()
+		{
+			return strike.chance();
+		}
 	}
 }

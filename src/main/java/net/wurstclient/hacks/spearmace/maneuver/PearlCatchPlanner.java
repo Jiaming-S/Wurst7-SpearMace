@@ -13,6 +13,7 @@ import java.util.Random;
 
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import net.wurstclient.hacks.spearmace.action.Prediction;
 import net.wurstclient.hacks.spearmace.sim.PearlSim;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.Shots;

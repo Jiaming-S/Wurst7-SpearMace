@@ -27,4 +27,9 @@ public record GameState(SelfState self, TargetState target)
 		return new GameState(SelfState.capture(),
 			target == null ? null : TargetState.capture(target));
 	}
+	
+	public boolean targetAlive()
+	{
+		return target != null && target.health() > 0;
+	}
 }

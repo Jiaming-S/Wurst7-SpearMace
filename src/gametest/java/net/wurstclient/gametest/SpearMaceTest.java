@@ -39,22 +39,25 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
+import net.wurstclient.hacks.spearmace.action.ActionRunner;
+import net.wurstclient.hacks.spearmace.action.ActionRunner.Result;
+import net.wurstclient.hacks.spearmace.action.ActionRunner.StartCondition;
+import net.wurstclient.hacks.spearmace.action.ActionRunner.Status;
 import net.wurstclient.hacks.spearmace.combat.Engage;
+import net.wurstclient.hacks.spearmace.combat.Engage.Engaged;
 import net.wurstclient.hacks.spearmace.combat.Engagement;
-import net.wurstclient.hacks.spearmace.combat.EscapeLunge;
 import net.wurstclient.hacks.spearmace.combat.Loadout;
 import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
 import net.wurstclient.hacks.spearmace.combat.MaceStrike;
+import net.wurstclient.hacks.spearmace.combat.MaceStrike.Struck;
 import net.wurstclient.hacks.spearmace.combat.StrikeOption;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Kind;
-import net.wurstclient.hacks.spearmace.combat.StunSlam;
+import net.wurstclient.hacks.spearmace.combat.StunSlam.Slammed;
 import net.wurstclient.hacks.spearmace.input.KeyInput;
-import net.wurstclient.hacks.spearmace.maneuver.Maneuver.Status;
-import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner;
-import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner.Result;
-import net.wurstclient.hacks.spearmace.maneuver.ManeuverRunner.StartCondition;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
+import net.wurstclient.hacks.spearmace.maneuver.PearlCatch.Caught;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
+import net.wurstclient.hacks.spearmace.maneuver.SpearLunge.Lunged;
 import net.wurstclient.hacks.spearmace.maneuver.WindChargeJump;
 import net.wurstclient.hacks.spearmace.model.Recorder;
 import net.wurstclient.hacks.spearmace.model.Recorder.Frame;
@@ -74,7 +77,7 @@ import net.wurstclient.mixinterface.IKeyMapping;
 import net.wurstclient.util.Rotation;
 
 /**
- * Scenario tests for the SpearMace movement maneuvers. Only runs when the
+ * Scenario tests for the SpearMace actions. Only runs when the
  * {@code WURST_SPEARMACE_TEST} environment variable is set, in which case
  * the regular {@link WurstTest} suite is skipped:
  *
@@ -107,7 +110,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private static final Rotation DIAGONAL = new Rotation(0, -30);
 	private static final Rotation STEEP_DIAGONAL = new Rotation(0, -45);
 	
-	private ManeuverRunner runner;
+	private ActionRunner runner;
+	private List<Frame> lastFrames = List.of();
 	
 	private record NamedReport(String name, Report filtered, Report open)
 	{}
@@ -420,10 +424,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 			reset(context, server);
 			
 			Vec3 start = playerPos(context);
-			SpearLunge lunge = new SpearLunge(0, pitch);
 			int[] spearTicks = {0};
-			List<Result> results =
-				run(context, name, 40, r -> r.enqueue(lunge), mc -> {
+			List<Result> results = run(context, name, 40,
+				r -> r.enqueue(new SpearLunge(0, pitch)), mc -> {
 					if(mc.player.getInventory().getSelectedSlot() == SPEAR_SLOT)
 						spearTicks[0]++;
 				});
@@ -437,8 +440,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 			int slot = context.computeOnClient(
 				mc -> mc.player.getInventory().getSelectedSlot());
 			
-			Vec3 expected = lunge.expectedImpulse();
-			Vec3 measured = lunge.measuredImpulse();
+			Lunged lunge = r.payload(Lunged.class);
+			Vec3 expected = lunge.expected();
+			Vec3 measured = lunge.measured();
 			LOGGER.info(
 				"SM: {} impulse expected={} measured={} distance={} spearTicks={}",
 				name, fmt(expected), fmt(measured), fmt(distance),
@@ -485,13 +489,12 @@ public final class SpearMaceTest implements FabricClientGameTest
 			String trial = name + " #" + (i + 1);
 			reset(context, server);
 			Vec3 start = playerPos(context);
-			PearlCatch pearlCatch = new PearlCatch(aim, delay);
-			Result r =
-				single(run(context, trial, 120, rr -> rr.enqueue(pearlCatch)),
-					trial, null);
+			Result r = single(run(context, trial, 120,
+				rr -> rr.enqueue(new PearlCatch(aim, delay))), trial, null);
 			if(r == null)
 				continue;
 			
+			Caught pearlCatch = r.payload(Caught.class);
 			double error =
 				pearlCatch.teleportedTo().distanceTo(r.prediction().endPos());
 			LOGGER.info("SM: {} teleported to {} predicted {} error={}", trial,
@@ -520,16 +523,17 @@ public final class SpearMaceTest implements FabricClientGameTest
 		{
 			String name = "WindCharge -> diagonal catch #" + (i + 1);
 			reset(context, server);
-			PearlCatch pearlCatch = PearlCatch.mostReliable(DIAGONAL);
 			List<Result> results = run(context, name, 150, r -> {
 				r.enqueue(WindChargeJump.atFeet(false));
-				r.enqueue(pearlCatch, StartCondition.atApex());
+				r.enqueue(PearlCatch.mostReliable(DIAGONAL),
+					StartCondition.atApex());
 			});
 			
 			if(!allDone(results, 2, name, null))
 				continue;
 			
 			Result c = results.get(1);
+			Caught pearlCatch = c.payload(Caught.class);
 			double error =
 				pearlCatch.teleportedTo().distanceTo(c.prediction().endPos());
 			LOGGER.info(
@@ -556,33 +560,28 @@ public final class SpearMaceTest implements FabricClientGameTest
 		context.waitFor(mc -> !mc.player.onGround());
 		
 		Vec3 start = playerPos(context);
-		ArrayList<SpearLunge> lunges = new ArrayList<>();
 		List<Result> results = run(context, name, 200, r -> {
 			for(int i = 0; i < 4; i++)
-			{
-				SpearLunge lunge = new SpearLunge(0, 0);
-				lunges.add(lunge);
-				r.enqueue(lunge, StartCondition
+				r.enqueue(new SpearLunge(0, 0), StartCondition
 					.when(p -> !p.onGround() && p.getY() > start.y - 35));
-			}
 		});
 		context.waitFor(mc -> mc.player.onGround(), 200);
 		double distance = horizontalDist(playerPos(context), start);
 		
 		allDone(results, 4, name, failures);
-		for(int i = 0; i < lunges.size(); i++)
+		for(int i = 0; i < results.size(); i++)
 		{
-			SpearLunge lunge = lunges.get(i);
-			Vec3 measured = lunge.measuredImpulse();
+			Lunged lunge = results.get(i).payload(Lunged.class);
+			if(lunge == null)
+				continue;
+			Vec3 measured = lunge.measured();
 			LOGGER.info(
 				"SM: {} #{} impulse expected={} measured={} attempts={}", name,
-				i + 1, fmt(lunge.expectedImpulse()), fmt(measured),
-				lunge.attempts());
-			if(measured != null
-				&& measured.distanceTo(lunge.expectedImpulse()) > 0.2
-					* lunge.expectedImpulse().length())
+				i + 1, fmt(lunge.expected()), fmt(measured), lunge.attempts());
+			if(measured.distanceTo(lunge.expected()) > 0.2
+				* lunge.expected().length())
 				failures.add(name + " #" + (i + 1) + ": impulse "
-					+ fmt(measured) + " vs " + fmt(lunge.expectedImpulse()));
+					+ fmt(measured) + " vs " + fmt(lunge.expected()));
 		}
 		
 		LOGGER.info("SM: {} travelled {} blocks", name, fmt(distance));
@@ -598,17 +597,17 @@ public final class SpearMaceTest implements FabricClientGameTest
 		{
 			String name = "Chain #" + (i + 1);
 			reset(context, server);
-			PearlCatch pearlCatch = PearlCatch.mostReliable(STEEP_DIAGONAL);
 			List<Result> results = run(context, name, 200, r -> {
 				r.enqueue(WindChargeJump.atFeet(false));
 				r.enqueue(new SpearLunge(0, 0), StartCondition.atApex());
-				r.enqueue(pearlCatch);
+				r.enqueue(PearlCatch.mostReliable(STEEP_DIAGONAL));
 			});
 			
 			if(!allDone(results, 3, name, null))
 				continue;
 			
 			Result c = results.get(2);
+			Caught pearlCatch = c.payload(Caught.class);
 			double error =
 				pearlCatch.teleportedTo().distanceTo(c.prediction().endPos());
 			LOGGER.info(
@@ -631,8 +630,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 		String name = "Infeasible catch";
 		reset(context, server);
 		
-		int maxDelay = context.computeOnClient(
-			mc -> PearlCatch.maxFeasibleDelay(UP, PearlCatch.MIN_CHANCE));
+		int maxDelay =
+			context.computeOnClient(mc -> PearlCatch.maxFeasibleDelay(mc.level,
+				SelfState.capture(), UP, PearlCatch.MIN_CHANCE));
 		LOGGER.info("SM: {} max feasible delay straight up = {}", name,
 			maxDelay);
 		if(maxDelay < 2 || maxDelay >= PearlCatch.MAX_DELAY)
@@ -681,7 +681,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		context.waitFor(
 			mc -> !mc.player.onGround() && clientEntity(golem) != null);
 		
-		Engage engage = runEngage(context, name, golem, failures);
+		Engaged engage = runEngage(context, name, failures);
 		if(engage == null)
 			return;
 		
@@ -689,7 +689,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		if(kind != expected)
 			failures.add(name + ": picked " + engage.decision() + ", expected "
 				+ expected);
-		if(engage.decision().maneuver() instanceof MaceStrike strike)
+		if(engage.result() instanceof Struck strike)
 			checkStrike(context, name, strike, kind == Kind.SPEARMACE,
 				failures);
 	}
@@ -699,24 +699,21 @@ public final class SpearMaceTest implements FabricClientGameTest
 	 * for the apex and compares it with the prediction.
 	 */
 	private void checkStrike(ClientGameTestContext context, String name,
-		MaceStrike strike, boolean beyondNormalReach, List<String> failures)
+		Struck strike, boolean beyondNormalReach, List<String> failures)
 	{
-		StrikeOption s = strike.struck();
+		StrikeOption s = strike.option();
 		double damage = initialHealth - targetHealth;
 		LOGGER.info(
 			"SM: {} struck {} damage actual={} predicted={} launch expected={} measured={} attempts={}",
-			name, s, fmt(damage), fmt(s.damage()),
-			fmt(strike.expectedLaunchVelY()), fmt(strike.measuredLaunchVelY()),
-			strike.attempts());
+			name, s, fmt(damage), fmt(s.damage()), fmt(strike.expectedLaunch()),
+			fmt(strike.measuredLaunch()), strike.attempts());
 		
 		if(Math.abs(damage - s.damage()) > Math.max(1.5, 0.05 * s.damage()))
 			failures.add(name + ": dealt " + fmt(damage) + " damage, predicted "
 				+ fmt(s.damage()) + " (" + s + ")");
-		if(Math.abs(
-			strike.measuredLaunchVelY() - strike.expectedLaunchVelY()) > 0.15)
-			failures
-				.add(name + ": launched at " + fmt(strike.measuredLaunchVelY())
-					+ ", expected " + fmt(strike.expectedLaunchVelY()));
+		if(Math.abs(strike.measuredLaunch() - strike.expectedLaunch()) > 0.15)
+			failures.add(name + ": launched at " + fmt(strike.measuredLaunch())
+				+ ", expected " + fmt(strike.expectedLaunch()));
 		if(beyondNormalReach && !(s.distance() > Loadout.DEFAULT_REACH))
 			failures.add(name + ": hit from " + fmt(s.distance())
 				+ ", not beyond normal reach");
@@ -735,7 +732,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		context.waitFor(
 			mc -> !mc.player.onGround() && clientEntity(golem) != null);
 		
-		Engage engage = runEngage(context, name, golem, failures);
+		Engaged engage = runEngage(context, name, failures);
 		if(engage == null)
 			return;
 		
@@ -745,7 +742,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			return;
 		}
 		
-		MaceStrike strike = (MaceStrike)engage.decision().maneuver();
+		Struck strike = (Struck)engage.result();
 		checkStrike(context, name, strike, false, failures);
 		
 		context.waitFor(mc -> mc.player.getDeltaMovement().y <= 0, 100);
@@ -770,7 +767,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			mc -> !mc.player.onGround() && clientEntity(golem) != null);
 		
 		double before = horizontalGap(context, golem);
-		Engage engage = runEngage(context, name, golem, failures);
+		Engaged engage = runEngage(context, name, failures);
 		if(engage == null)
 			return;
 		
@@ -782,10 +779,10 @@ public final class SpearMaceTest implements FabricClientGameTest
 		
 		context.waitTicks(5);
 		double after = horizontalGap(context, golem);
-		SpearLunge lunge = ((EscapeLunge)engage.decision().maneuver()).lunge();
+		Lunged lunge = (Lunged)engage.result();
 		LOGGER.info("SM: {} gap {} -> {} impulse expected={} measured={}", name,
-			fmt(before), fmt(after), fmt(lunge.expectedImpulse()),
-			fmt(lunge.measuredImpulse()));
+			fmt(before), fmt(after), fmt(lunge.expected()),
+			fmt(lunge.measured()));
 		if(after - before < 2)
 			failures.add(name + ": only got " + fmt(after - before)
 				+ " blocks further away");
@@ -794,7 +791,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private void testStunSlam(ClientGameTestContext context,
 		TestServerContext server, List<String> failures)
 	{
-		// control: a plain mace hit into the shield does nothing
+		// control: a plain mace hit into the shield does nothing, which the
+		// model knows, so the strike runs against its prediction
 		String control = "Mace into raised shield";
 		reset(context, server);
 		int dummy = spawnShieldDummy(server);
@@ -804,15 +802,14 @@ public final class SpearMaceTest implements FabricClientGameTest
 			mc -> !mc.player.onGround() && clientEntity(dummy) != null);
 		context.waitTicks(1);
 		
-		MaceStrike[] plain = new MaceStrike[1];
-		List<Result> results = run(context, control, 80, r -> {
-			plain[0] = new MaceStrike(clientEntity(dummy), PreItem.HAND);
-			r.enqueue(plain[0]);
-		});
+		List<Result> results = run(context, control, 80,
+			r -> r.enqueueAnyway(new MaceStrike(PreItem.HAND)));
+		long attacks =
+			lastFrames.stream().filter(f -> f.input().attack()).count();
 		double controlDamage = initialHealth - targetHealth;
-		LOGGER.info("SM: {} {} attempts={} damage={}", control, results,
-			plain[0].attempts(), fmt(controlDamage));
-		if(plain[0].attempts() == 0)
+		LOGGER.info("SM: {} {} attacks={} damage={}", control, results, attacks,
+			fmt(controlDamage));
+		if(attacks == 0)
 			failures.add(control + ": never attacked");
 		if(controlDamage > 0.5)
 			failures.add(control + ": the shield let " + fmt(controlDamage)
@@ -827,7 +824,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			mc -> !mc.player.onGround() && clientEntity(dummy2) != null);
 		context.waitTicks(1);
 		
-		Engage engage = runEngage(context, name, dummy2, failures);
+		Engaged engage = runEngage(context, name, failures);
 		if(engage == null)
 			return;
 		
@@ -837,7 +834,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			return;
 		}
 		
-		StunSlam slam = (StunSlam)engage.decision().maneuver();
+		Slammed slam = (Slammed)engage.result();
 		double damage = initialHealth - targetHealth;
 		boolean[] shield = server.computeOnServer(mc -> {
 			ShieldDummy d = shieldDummy;
@@ -847,8 +844,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 		LOGGER.info(
 			"SM: {} damage actual={} predicted={} fall={} launch expected={} measured={} using={} cooldown={} clientSawDown={}",
 			name, fmt(damage), fmt(slam.expectedDamage()),
-			fmt(slam.expectedFall()), fmt(slam.expectedLaunchVelY()),
-			fmt(slam.measuredLaunchVelY()), shield[0], shield[1],
+			fmt(slam.expectedFall()), fmt(slam.expectedLaunch()),
+			fmt(slam.measuredLaunch()), shield[0], shield[1],
 			slam.shieldWasDown());
 		
 		if(shield[0] || !shield[1])
@@ -858,11 +855,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 			0.05 * slam.expectedDamage()))
 			failures.add(name + ": dealt " + fmt(damage) + " damage, predicted "
 				+ fmt(slam.expectedDamage()));
-		if(Math
-			.abs(slam.measuredLaunchVelY() - slam.expectedLaunchVelY()) > 0.15)
-			failures
-				.add(name + ": launched at " + fmt(slam.measuredLaunchVelY())
-					+ ", expected " + fmt(slam.expectedLaunchVelY()));
+		if(Math.abs(slam.measuredLaunch() - slam.expectedLaunch()) > 0.15)
+			failures.add(name + ": launched at " + fmt(slam.measuredLaunch())
+				+ ", expected " + fmt(slam.expectedLaunch()));
 	}
 	
 	private void testCombatChain(ClientGameTestContext context,
@@ -876,35 +871,36 @@ public final class SpearMaceTest implements FabricClientGameTest
 		context.waitFor(mc -> clientEntity(golem) != null);
 		context.waitTicks(2);
 		
-		Engage[] engages = new Engage[2];
 		List<Result> results = run(context, name, 250, r -> {
-			engages[0] = new Engage(clientEntity(golem));
-			engages[1] = new Engage(clientEntity(golem));
 			r.enqueue(WindChargeJump.atFeet(false));
-			r.enqueue(engages[0], StartCondition.atApex());
-			r.enqueue(engages[1], StartCondition.atApex());
+			r.enqueue(new Engage(), StartCondition.atApex());
+			r.enqueue(new Engage(), StartCondition.atApex());
 		});
 		
 		if(!allDone(results, 3, name, failures))
 			return;
 		
 		LOGGER.info("SM: {} picked {} then {}, total damage {}", name,
-			engages[0].decision(), engages[1].decision(),
+			results.get(1).payload(Engaged.class).decision(),
+			results.get(2).payload(Engaged.class).decision(),
 			fmt(initialHealth - targetHealth));
 	}
 	
-	/** Runs one {@link Engage} against the given client entity. */
-	private Engage runEngage(ClientGameTestContext context, String name,
-		int targetId, List<String> failures)
+	/**
+	 * Runs one {@link Engage} against the watched target.
+	 *
+	 * @return what it did, or {@code null} if it failed
+	 */
+	private Engaged runEngage(ClientGameTestContext context, String name,
+		List<String> failures)
 	{
-		Engage[] engage = new Engage[1];
-		List<Result> results = run(context, name, 150, r -> {
-			engage[0] = new Engage(clientEntity(targetId));
-			r.enqueue(engage[0]);
-		});
-		
-		LOGGER.info("SM: {} decision {}", name, engage[0].decision());
-		return single(results, name, failures) == null ? null : engage[0];
+		Result r =
+			single(run(context, name, 150, rr -> rr.enqueue(new Engage())),
+				name, failures);
+		Engaged engaged = r == null ? null : r.payload(Engaged.class);
+		LOGGER.info("SM: {} decision {}", name,
+			engaged == null ? null : engaged.decision());
+		return engaged;
 	}
 	
 	private int spawnGolem(TestServerContext server, double x, double y,
@@ -988,19 +984,19 @@ public final class SpearMaceTest implements FabricClientGameTest
 	 * Runs the runner until it is idle, logging every tick.
 	 */
 	private List<Result> run(ClientGameTestContext context, String name,
-		int maxTicks, Consumer<ManeuverRunner> setup)
+		int maxTicks, Consumer<ActionRunner> setup)
 	{
 		return run(context, name, maxTicks, setup, mc -> {});
 	}
 	
 	private List<Result> run(ClientGameTestContext context, String name,
-		int maxTicks, Consumer<ManeuverRunner> setup,
-		Consumer<Minecraft> perTick)
+		int maxTicks, Consumer<ActionRunner> setup, Consumer<Minecraft> perTick)
 	{
 		Recorder recorder =
 			new Recorder(() -> targetId >= 0 ? clientEntity(targetId) : null);
 		context.runOnClient(mc -> {
-			runner = new ManeuverRunner();
+			runner = new ActionRunner(
+				() -> targetId >= 0 ? clientEntity(targetId) : null);
 			setup.accept(runner);
 			runner.start();
 			recorder.start();
@@ -1029,7 +1025,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 		return context.computeOnClient(mc -> {
 			runner.stop();
 			recorder.stop();
-			replay(mc, name, recorder.frames());
+			lastFrames = recorder.frames();
+			replay(mc, name, lastFrames);
 			return runner.results();
 		});
 	}
@@ -1113,8 +1110,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 	{
 		String problem = null;
 		if(results.size() < expected)
-			problem = "only " + results.size() + "/" + expected
-				+ " maneuvers finished";
+			problem =
+				"only " + results.size() + "/" + expected + " actions finished";
 		else
 			for(Result r : results)
 				if(r.status() != Status.DONE)

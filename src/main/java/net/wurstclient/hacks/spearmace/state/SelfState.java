@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.WindCharge;
@@ -93,6 +94,36 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 					p.getDeltaMovement(), p.tickCount));
 		}
 		return pending;
+	}
+	
+	/**
+	 * Whether an attack click queued now with {@code weapon} would pass
+	 * {@code Player.cannotAttackWithItem()} in the next tick, which checks
+	 * the weapon's minimum charge against the attack speed of the item held
+	 * now.
+	 */
+	public boolean canAttackNextTick(ItemStack weapon)
+	{
+		return ticksUntilAttack(weapon) == 0;
+	}
+	
+	/**
+	 * How many more updates to wait before queuing an attack click with
+	 * {@code weapon}, if the held item doesn't change.
+	 */
+	public int ticksUntilAttack(ItemStack weapon)
+	{
+		float minCharge =
+			weapon.getOrDefault(DataComponents.MINIMUM_ATTACK_CHARGE, 0F);
+		double delay = kit.attackDelay(kit.held());
+		for(int wait = 0; wait < 100; wait++)
+		{
+			// the next player tick resets a changed item's charge
+			int ticker = heldChanged ? wait : attackStrengthTicker + wait + 1;
+			if(ticker / delay >= minCharge)
+				return wait;
+		}
+		return 100;
 	}
 	
 	public Vec3 eyePos()

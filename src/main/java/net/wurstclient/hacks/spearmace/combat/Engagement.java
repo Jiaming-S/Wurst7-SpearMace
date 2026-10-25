@@ -9,7 +9,6 @@ package net.wurstclient.hacks.spearmace.combat;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.AttackRange;
 import net.minecraft.world.level.Level;
@@ -19,7 +18,6 @@ import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.sim.TargetSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
-import net.wurstclient.hacks.spearmace.state.TargetState;
 import net.wurstclient.util.Rotation;
 
 /**
@@ -96,12 +94,6 @@ public final class Engagement
 	public static Engagement of(Level level, GameState state)
 	{
 		return new Engagement(level, state);
-	}
-	
-	/** Predicts from the current state of the player and {@code target}. */
-	public static Engagement now(LivingEntity target)
-	{
-		return of(MC.level, GameState.capture(target));
 	}
 	
 	/** The state this prediction starts from. */
@@ -232,12 +224,6 @@ public final class Engagement
 			sb.append(String.format(" %d:%.2f/%.2f%s", i, distance(i), fall[i],
 				inReach(held, i) ? "*" : ""));
 		return sb.toString();
-	}
-	
-	/** Whether the target is holding up a shield or something like it. */
-	public static boolean shieldRaised(LivingEntity target)
-	{
-		return TargetState.shieldRaised(target);
 	}
 	
 	/**

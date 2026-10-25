@@ -79,6 +79,24 @@ public final class PlayerSim
 		return sim;
 	}
 	
+	/**
+	 * The part of the velocity change from {@code before} to {@code after},
+	 * one update later, that the player's own movement doesn't explain:
+	 * pushes from the server such as explosions, lunges and launches.
+	 * {@code after} has the keys and the view that the move used.
+	 */
+	public static Vec3 push(Level level, SelfState before, SelfState after)
+	{
+		PlayerSim sim =
+			new PlayerSim(level, before.pos(), before.vel(), before.onGround());
+		sim.yaw = after.yaw();
+		sim.forward = after.forward();
+		sim.sprinting = after.sprinting();
+		sim.jump = after.jump();
+		sim.step();
+		return after.vel().subtract(sim.vel);
+	}
+	
 	public PlayerSim copy()
 	{
 		PlayerSim sim = new PlayerSim(level, pos, vel, onGround);

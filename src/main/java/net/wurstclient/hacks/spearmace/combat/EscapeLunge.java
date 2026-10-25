@@ -7,69 +7,39 @@
  */
 package net.wurstclient.hacks.spearmace.combat;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import net.wurstclient.WurstClient;
-import net.wurstclient.hacks.spearmace.maneuver.Maneuver;
-import net.wurstclient.hacks.spearmace.maneuver.Prediction;
+import net.wurstclient.hacks.spearmace.action.Action;
+import net.wurstclient.hacks.spearmace.action.Step;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
+import net.wurstclient.hacks.spearmace.state.GameState;
 
 /**
- * A flat {@link SpearLunge} straight away from a target, for when it falls
- * onto us from above and the spear can't reach it.
+ * A flat {@link SpearLunge} straight away from the target, for when it
+ * falls onto us from above and the spear can't reach it.
  */
-public final class EscapeLunge implements Maneuver
+public record EscapeLunge() implements Action
 {
-	private static final Minecraft MC = WurstClient.MC;
-	
-	private final LivingEntity target;
-	private SpearLunge lunge;
-	
-	public EscapeLunge(LivingEntity target)
-	{
-		this.target = target;
-	}
-	
 	@Override
 	public String name()
 	{
-		return "EscapeLunge(" + lunge().name() + ")";
+		return "EscapeLunge";
+	}
+	
+	@Override
+	public Step next(Level level, GameState s)
+	{
+		if(s.target() == null)
+			return Step.fail("no target");
+		return new SpearLunge(awayYaw(s), 0).next(level, s);
 	}
 	
 	/** The yaw that faces away from the target, horizontally. */
-	public static float awayYaw(LivingEntity target)
+	public static float awayYaw(GameState s)
 	{
-		Vec3 away = MC.player.position().subtract(target.position());
+		Vec3 away = s.self().pos().subtract(s.target().pos());
 		if(away.horizontalDistanceSqr() < 1e-4)
-			return MC.player.getYRot();
-		
+			return s.self().yaw();
 		return (float)Math.toDegrees(Math.atan2(away.z, away.x)) - 90F;
-	}
-	
-	@Override
-	public Prediction predict()
-	{
-		return lunge().predict();
-	}
-	
-	@Override
-	public Status tick(long tick)
-	{
-		return lunge().tick(tick);
-	}
-	
-	@Override
-	public String failureReason()
-	{
-		return lunge().failureReason();
-	}
-	
-	/** The lunge, aimed when this is first used. */
-	public SpearLunge lunge()
-	{
-		if(lunge == null)
-			lunge = new SpearLunge(awayYaw(target), 0);
-		return lunge;
 	}
 }
