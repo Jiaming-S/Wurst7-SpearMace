@@ -37,6 +37,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
+import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.spearmace.combat.Engage;
 import net.wurstclient.hacks.spearmace.combat.Engagement;
 import net.wurstclient.hacks.spearmace.combat.EscapeLunge;
@@ -159,6 +160,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			spContext.getConnection().waitForChunksRender();
 			
 			testStateCapture(context, server, failures);
+			testPreview(context, server);
 			
 			if(runs("movement"))
 			{
@@ -300,6 +302,39 @@ public final class SpearMaceTest implements FabricClientGameTest
 			check(failures, name, "engagement landing " + e.landing(),
 				e.landing() > 0 && e.landing() <= Engagement.HORIZON);
 		});
+	}
+	
+	/**
+	 * Takes screenshots of SpearMacePreview while falling toward a target
+	 * and while a pearl flies, for checking the drawing by eye.
+	 */
+	private void testPreview(ClientGameTestContext context,
+		TestServerContext server)
+	{
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + (GROUND_Y + 14) + " "
+			+ (TARGET_Z - 8) + " 0 65");
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(golem) != null);
+		context.runOnClient(
+			mc -> WurstClient.INSTANCE.getHax().spearMacePreviewHack
+				.setEnabled(true));
+		context.waitTicks(4);
+		context.takeScreenshot("spearmace_preview_fall");
+		
+		reset(context, server);
+		context.runOnClient(mc -> {
+			WurstClient.INSTANCE.getHax().spearMacePreviewHack.setEnabled(true);
+			KeyInput.look(new Rotation(0, -30));
+			KeyInput.selectSlot(3);
+			KeyInput.clickUse();
+		});
+		context.waitTicks(8);
+		context.takeScreenshot("spearmace_preview_pearl");
+		context.runOnClient(
+			mc -> WurstClient.INSTANCE.getHax().spearMacePreviewHack
+				.setEnabled(false));
 	}
 	
 	private static void check(List<String> failures, String name, String what,
