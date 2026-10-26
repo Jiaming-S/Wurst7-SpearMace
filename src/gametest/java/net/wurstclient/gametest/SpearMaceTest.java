@@ -1362,14 +1362,25 @@ public final class SpearMaceTest implements FabricClientGameTest
 				&& e.reason() != null
 				&& e.reason().contains(Trigger.TARGET_DIVERGED.name()))
 			.count();
-		LOGGER.info("SM: {} strikes={} target divergences={} damage={}", name,
-			strikes, diverged, fmt(initialHealth - targetHealth));
-		if(diverged == 0)
+		int took = history.isEmpty() ? 0
+			: history.getLast().endTick() - history.getFirst().startTick();
+		LOGGER.info(
+			"SM: {} strikes={} target divergences={} damage={} updates={}",
+			name, strikes, diverged, fmt(initialHealth - targetHealth), took);
+		// two quick strikes can land before the target leaves its expected
+		// path, leaving nothing to replan
+		if(diverged == 0 && (strikes < 2 || took > QUICK_STRIKES))
 			failures.add(
 				name + ": never replanned on the target's path: " + history);
 		if(strikes < 2)
 			failures.add(name + ": only " + strikes + " strikes: " + history);
 	}
+	
+	/**
+	 * Updates within which two strikes on the circling target don't need a
+	 * replan. Quick runs took about 90, ones that diverged about 160.
+	 */
+	private static final int QUICK_STRIKES = 120;
 	
 	/** Walks the golem around the server player, keeping the radius. */
 	private static void circle(MinecraftServer mc, int golem)
