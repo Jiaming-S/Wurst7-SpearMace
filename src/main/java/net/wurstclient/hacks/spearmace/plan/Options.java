@@ -33,10 +33,12 @@ import net.wurstclient.util.Rotation;
  * The actions worth trying from a state, in the order the rules prefer
  * them:
  * <ul>
- * <li>below the target: pearl catches straight up and steeply toward it,
- * to get above it again</li>
- * <li>far from the target: pearl catches toward it, a lunge toward it,
- * or a launch for height, running forward or straight up</li>
+ * <li>below the target: a pearl catch straight up, to get above it
+ * again</li>
+ * <li>far from the target: on the ground, diagonal pearl catches toward
+ * it (only when very far, they miss more often than straight up) and a
+ * pearl catch straight up; a lunge toward it, or a launch for height,
+ * running forward or straight up</li>
  * <li>in the air: drift toward the target</li>
  * <li>rising: wait for the apex</li>
  * <li>on the ground near the target: a pearl catch straight up, or a
@@ -58,7 +60,17 @@ public final class Options
 	/** Faster than gravity leaves a player standing still. */
 	private static final double RISING = 0.1;
 	
-	/** Diagonal for distance, steep for height. */
+	/**
+	 * Further than this horizontally, diagonal pearl catches are worth
+	 * their misses; they cover about 17 (steep) to 22 (diagonal) blocks.
+	 * Closer, a catch straight up and then lunges get there more reliably.
+	 */
+	private static final double DIAGONAL_RANGE = 20;
+	
+	/**
+	 * Diagonal for distance, steep for height. Only thrown from the
+	 * ground, where they miss the least.
+	 */
 	private static final float[] CATCH_PITCHES = {-30, -45};
 	private static final int CATCH_DELAY = 3;
 	
@@ -90,7 +102,7 @@ public final class Options
 		SelfState self = s.self();
 		boolean far = s.targetAlive() && horizontalDistance(s) > LAUNCH_RANGE;
 		if(s.targetAlive() && below(s) && !(self.vel().y > RISING))
-			addClimb(s, actions);
+			addVerticalCatch(s, actions);
 		if(!s.targetAlive())
 			actions.add(new Hold("no target", HOLD));
 		else if(self.vel().y > RISING)
@@ -116,7 +128,7 @@ public final class Options
 		}else
 		{
 			if(far)
-				addApproach(s, actions, true);
+				addApproach(s, actions, false);
 			else
 			{
 				addStrikes(level, s, actions);
@@ -130,19 +142,22 @@ public final class Options
 	}
 	
 	/**
-	 * Ways to get closer: pearl catches toward the target, a flat lunge
-	 * toward it, and a launch for height that later moves can use.
+	 * Ways to get closer: pearl catches toward the target or straight up
+	 * (from the ground only), a flat lunge toward it, and a launch for
+	 * height that later moves can use.
 	 */
 	private static void addApproach(GameState s, List<Action> actions,
 		boolean pearls)
 	{
 		Kit kit = s.self().kit();
 		float yaw = towardYaw(s);
-		if(pearls && canCatch(kit))
+		if(pearls && horizontalDistance(s) > DIAGONAL_RANGE)
 			for(float pitch : CATCH_PITCHES)
 				addIfNew(actions,
 					new PearlCatch(new Rotation(yaw, pitch), CATCH_DELAY),
-					true);
+					canCatch(kit));
+		if(pearls)
+			addVerticalCatch(s, actions);
 		if(kit.lungeSpear() >= 0 && kit.hand() >= 0)
 			actions.add(new SpearLunge(yaw, 0));
 		if(s.self().onGround() && kit.windCharge() >= 0)
@@ -156,19 +171,6 @@ public final class Options
 	{
 		addIfNew(actions,
 			new PearlCatch(new Rotation(towardYaw(s), VERTICAL_PITCH),
-				CATCH_DELAY),
-			canCatch(s.self().kit()));
-	}
-	
-	/**
-	 * Ways back above a target that is higher up: straight up, or steeply
-	 * toward it.
-	 */
-	private static void addClimb(GameState s, List<Action> actions)
-	{
-		addVerticalCatch(s, actions);
-		addIfNew(actions,
-			new PearlCatch(new Rotation(towardYaw(s), CATCH_PITCHES[1]),
 				CATCH_DELAY),
 			canCatch(s.self().kit()));
 	}
