@@ -62,6 +62,15 @@ public final class PearlCatchPlanner
 	/** How many pearl moves off the plan a catch still counts as a hit. */
 	public static final int CATCH_TOLERANCE = 1;
 	
+	/**
+	 * Platt scaling of the Monte Carlo estimate, fitted on 3087 thrown pearls
+	 * from the {@code catchdata} gametest: {@code sigmoid(a * logit(p) + b)}.
+	 * The raw estimate is overconfident (0.9 hit about 0.82 of the time),
+	 * as it leaves out errors like the pearl's knownMovement.
+	 */
+	private static final double CALIBRATION_SLOPE = 0.778;
+	private static final double CALIBRATION_OFFSET = -0.198;
+	
 	/** How many aim candidates get a full Monte Carlo evaluation. */
 	private static final int MAX_EVALUATED = 6;
 	
@@ -287,7 +296,16 @@ public final class PearlCatchPlanner
 				hits++;
 		}
 		
-		return (double)hits / samples;
+		return calibrate((double)hits / samples);
+	}
+	
+	/** Maps a raw Monte Carlo hit rate to how often such catches work. */
+	public static double calibrate(double raw)
+	{
+		double p = Math.clamp(raw, 1e-3, 1 - 1e-3);
+		double logit = Math.log(p / (1 - p));
+		return 1
+			/ (1 + Math.exp(-(CALIBRATION_SLOPE * logit + CALIBRATION_OFFSET)));
 	}
 	
 	/**
