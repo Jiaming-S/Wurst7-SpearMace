@@ -15,6 +15,7 @@ import net.wurstclient.hacks.spearmace.action.Controller;
 import net.wurstclient.hacks.spearmace.model.TargetModel;
 import net.wurstclient.hacks.spearmace.model.TickSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
+import net.wurstclient.hacks.spearmace.viz.Preview;
 
 /**
  * Picks what to do from now until the next decision point. Which
@@ -52,9 +53,15 @@ public final class Planner
 		TickSim model = new TickSim(level, targetModel);
 		SearchProblem problem =
 			new ModelProblem(now, model, options, controller, evaluator);
+		SearchTrace trace =
+			Preview.isTracing() ? new SearchTrace(problem) : null;
+		if(trace != null)
+			problem = trace;
 		long start = System.nanoTime();
 		Plan plan = search.search(problem, Budget.millis(budgetMillis));
 		long nanos = System.nanoTime() - start;
+		if(trace != null)
+			Preview.showTree(now, trace, plan, nanos);
 		totalNanos += nanos;
 		replans++;
 		LOGGER.info("[{}] plan {} in {} ms", now.self().tick(), plan,

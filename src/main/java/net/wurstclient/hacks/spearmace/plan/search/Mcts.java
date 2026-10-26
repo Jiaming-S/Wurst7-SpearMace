@@ -108,6 +108,7 @@ public final class Mcts implements Search
 			}
 		}
 		
+		noteVisits(p, root);
 		if(root.children.isEmpty())
 			return Plan.NOTHING;
 		
@@ -126,6 +127,15 @@ public final class Mcts implements Search
 		return new Plan(actions, path,
 			root.children.stream().mapToDouble(Node::mean).max().orElse(0),
 			String.format("mcts, %d iterations", iterations));
+	}
+	
+	private static void noteVisits(SearchProblem p, Node node)
+	{
+		for(Node c : node.children)
+		{
+			p.note(c.via, String.format("n=%d mean=%.1f", c.visits, c.mean()));
+			noteVisits(p, c);
+		}
 	}
 	
 	/** UCT, with the returns scaled to [0, 1]. */
@@ -149,6 +159,7 @@ public final class Mcts implements Search
 			for(Action a : p.actions(s))
 			{
 				Outcome o = p.play(s, a);
+				p.note(o, "rollout");
 				if(!o.failed())
 				{
 					next = o;

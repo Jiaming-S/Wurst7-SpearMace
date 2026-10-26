@@ -78,6 +78,10 @@ public final class BeamSearch implements Search
 			next.sort(Comparator.comparingDouble(Node::rank).reversed());
 			beam = next.subList(0, Math.min(width, next.size()));
 			reached = d + 1;
+			for(int i = 0; i < beam.size(); i++)
+				if(beam.get(i).path().size() == d + 1)
+					p.note(beam.get(i).path().getLast(),
+						String.format("beam d=%d #%d", d + 1, i + 1));
 		}
 		
 		Node best = beam.getFirst();

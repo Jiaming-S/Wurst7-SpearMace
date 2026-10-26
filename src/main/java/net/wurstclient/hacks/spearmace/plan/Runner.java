@@ -111,10 +111,21 @@ public final class Runner implements UpdateListener
 		replans++;
 		if(!triggers.isEmpty())
 			LOGGER.info("[{}] replanned on {}", now.self().tick(), triggers);
-		if(!plan.expected().isEmpty())
-			Preview.show(plan.toString(), now,
-				plan.expected().getFirst().steps());
+		showPreview(plan, now);
 		execution = new Execution(plan, now.self().tick());
+	}
+	
+	/** Publishes the whole plan, marking where its first action ends. */
+	public static void showPreview(Plan plan, GameState now)
+	{
+		if(plan.expected().isEmpty())
+			return;
+		
+		ArrayList<Transition> steps = new ArrayList<>();
+		for(Outcome o : plan.expected())
+			steps.addAll(o.steps());
+		Preview.show(plan.toString(), now, steps,
+			plan.expected().getFirst().ticks());
 	}
 	
 	/** Every action that ended so far, oldest first. */

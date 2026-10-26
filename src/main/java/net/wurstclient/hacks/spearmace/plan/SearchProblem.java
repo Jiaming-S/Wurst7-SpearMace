@@ -35,4 +35,11 @@ public interface SearchProblem
 	
 	/** Nothing left to plan for, such as the target being dead. */
 	public boolean isTerminal(GameState s);
+	
+	/**
+	 * What the search thought of {@code o}, for {@link SearchTrace}. Does
+	 * nothing unless the search tree is being shown.
+	 */
+	public default void note(Outcome o, String note)
+	{}
 }

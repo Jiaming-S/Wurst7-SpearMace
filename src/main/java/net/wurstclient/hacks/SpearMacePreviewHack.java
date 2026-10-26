@@ -15,11 +15,15 @@ import java.util.List;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.util.CommonColors;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.Category;
 import net.wurstclient.SearchTags;
+import net.wurstclient.events.GUIRenderListener;
 import net.wurstclient.events.RenderListener;
 import net.wurstclient.events.UpdateListener;
 import net.wurstclient.hack.Hack;
@@ -29,12 +33,18 @@ import net.wurstclient.hacks.spearmace.model.TargetModel;
 import net.wurstclient.hacks.spearmace.model.TickInput;
 import net.wurstclient.hacks.spearmace.model.TickSim;
 import net.wurstclient.hacks.spearmace.model.Transition;
+import net.wurstclient.hacks.spearmace.plan.Plan;
+import net.wurstclient.hacks.spearmace.plan.Runner;
+import net.wurstclient.hacks.spearmace.plan.Triggers;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 import net.wurstclient.hacks.spearmace.viz.Preview;
 import net.wurstclient.hacks.spearmace.viz.PreviewRenderer;
+import net.wurstclient.hacks.spearmace.viz.TreeRenderer;
+import net.wurstclient.hacks.spearmace.viz.TreeRenderer.Coloring;
 import net.wurstclient.settings.CheckboxSetting;
 import net.wurstclient.settings.ColorSetting;
+import net.wurstclient.settings.EnumSetting;
 import net.wurstclient.settings.SliderSetting;
 import net.wurstclient.settings.SliderSetting.ValueDisplay;
 import net.wurstclient.util.EntityUtils;
@@ -45,10 +55,15 @@ import net.wurstclient.util.EntityUtils;
  * predicts the next few seconds if you keep holding the same keys and
  * click nothing. Your own clicks are worked out from what they do, so
  * throws and hits you make by hand are tracked too.
+ *
+ * <p>
+ * It can also draw every action the planner's search played, and run the
+ * planner without SpearMace acting, to see what it would do. Searches can
+ * take much longer than a tick then, so lower the game's tick rate.
  */
 @SearchTags({"spear mace preview", "SpearMace", "prediction"})
 public final class SpearMacePreviewHack extends Hack
-	implements UpdateListener, RenderListener
+	implements UpdateListener, RenderListener, GUIRenderListener
 {
 	private static final double TARGET_RANGE = 32;
 	
@@ -65,6 +80,53 @@ public final class SpearMacePreviewHack extends Hack
 			+ " took next to it. A new one starts when you click or when it"
 			+ " runs out.",
 		false);
+	
+	private final CheckboxSetting fullPlan = new CheckboxSetting("Full plan",
+		"Draws all of the bot's planned actions, not just the first.", true);
+	
+	private final CheckboxSetting searchTree =
+		new CheckboxSetting("Search tree",
+			"Draws every action the planner's search played, with the chosen"
+				+ " plan in white. Makes the search a little slower.",
+			false);
+	
+	private final EnumSetting<Coloring> treeColors =
+		new EnumSetting<>("Tree colors",
+			"§lDepth§r - One color per decision point.\n\n"
+				+ "§lReturn§r - Red for the worst plans, green for the best,"
+				+ " by their score plus the value of where they end.",
+			Coloring.values(), Coloring.DEPTH);
+	
+	private final CheckboxSetting showFailed =
+		new CheckboxSetting("Show failed",
+			"Draws actions that failed in the search, in gray.", true);
+	
+	private final CheckboxSetting showRollouts = new CheckboxSetting(
+		"Show rollouts",
+		"Draws the actions MCTS only played to estimate a new node, faintly.",
+		false);
+	
+	private final SliderSetting maxEdges = new SliderSetting("Max edges",
+		"The most actions of the search tree to draw, besides the chosen"
+			+ " ones. The ones the search played first come first.",
+		500, 10, 2000, 10, ValueDisplay.INTEGER);
+	
+	private final CheckboxSetting searchInfo =
+		new CheckboxSetting("Search info",
+			"Lists what the search picked and the alternatives it compared on"
+				+ " the screen, while the search tree is shown.",
+			true);
+	
+	private final CheckboxSetting dryRun = new CheckboxSetting("Dry run",
+		"While SpearMace is off, runs its planner here with SpearMace's"
+			+ " settings, without pressing anything, so you can see what it"
+			+ " would do while you fly by hand.",
+		false);
+	
+	private final SliderSetting dryRunInterval =
+		new SliderSetting("Dry run interval",
+			"How often the dry run plans again, besides at decision points.",
+			10, 1, 40, 1, ValueDisplay.INTEGER.withSuffix(" ticks"));
 	
 	private final ColorSetting selfColor = new ColorSetting("Prediction color",
 		"Your predicted path.", Color.CYAN);
@@ -86,6 +148,8 @@ public final class SpearMacePreviewHack extends Hack
 	private List<Transition> ghostRollout = List.of();
 	private final ArrayList<Vec3> trail = new ArrayList<>();
 	
+	private int lastDryRun = Integer.MIN_VALUE;
+	
 	public SpearMacePreviewHack()
 	{
 		super("SpearMacePreview");
@@ -93,6 +157,15 @@ public final class SpearMacePreviewHack extends Hack
 		addSetting(horizon);
 		addSetting(showPlans);
 		addSetting(ghost);
+		addSetting(fullPlan);
+		addSetting(searchTree);
+		addSetting(treeColors);
+		addSetting(showFailed);
+		addSetting(showRollouts);
+		addSetting(maxEdges);
+		addSetting(searchInfo);
+		addSetting(dryRun);
+		addSetting(dryRunInterval);
 		addSetting(selfColor);
 		addSetting(targetColor);
 		addSetting(actualColor);
@@ -103,6 +176,7 @@ public final class SpearMacePreviewHack extends Hack
 	{
 		EVENTS.add(UpdateListener.class, this);
 		EVENTS.add(RenderListener.class, this);
+		EVENTS.add(GUIRenderListener.class, this);
 	}
 	
 	@Override
@@ -110,6 +184,9 @@ public final class SpearMacePreviewHack extends Hack
 	{
 		EVENTS.remove(UpdateListener.class, this);
 		EVENTS.remove(RenderListener.class, this);
+		EVENTS.remove(GUIRenderListener.class, this);
+		Preview.setTracing(false);
+		lastDryRun = Integer.MIN_VALUE;
 		lastCaptured = null;
 		lastObserved = null;
 		start = null;
@@ -139,8 +216,13 @@ public final class SpearMacePreviewHack extends Hack
 		}
 		
 		GameState observed = Observer.observe(captured, predicted);
+		GameState previous = lastObserved;
 		lastCaptured = captured;
 		lastObserved = observed;
+		
+		Preview.setTracing(searchTree.isChecked());
+		if(dryRun.isChecked() && !WURST.getHax().spearMaceHack.isEnabled())
+			dryRun(previous, observed);
 		
 		SelfState self = observed.self();
 		TickInput hold = new TickInput(null, self.move(), self.sprinting(),
@@ -160,6 +242,27 @@ public final class SpearMacePreviewHack extends Hack
 			trail.clear();
 		}
 		trail.add(self.pos());
+	}
+	
+	/**
+	 * Plans like SpearMace would at decision points and every few ticks,
+	 * and only shows the plan.
+	 */
+	private void dryRun(GameState previous, GameState now)
+	{
+		if(!now.targetAlive())
+			return;
+		
+		int tick = now.self().tick();
+		boolean due = tick - lastDryRun >= dryRunInterval.getValueI()
+			|| tick < lastDryRun;
+		if(!due && Triggers.detect(previous, now, null, null).isEmpty())
+			return;
+		
+		Plan plan =
+			WURST.getHax().spearMaceHack.newPlanner().replan(MC.level, now);
+		Runner.showPreview(plan, now);
+		lastDryRun = tick;
 	}
 	
 	/** The entity under the crosshair, or the closest one in range. */
@@ -186,7 +289,8 @@ public final class SpearMacePreviewHack extends Hack
 		Preview.Plan plan =
 			showPlans.isChecked() ? Preview.latest(start.self().tick()) : null;
 		if(plan != null)
-			PreviewRenderer.draw(matrixStack, plan.start(), plan.rollout(),
+			PreviewRenderer.draw(matrixStack, plan.start(),
+				fullPlan.isChecked() ? plan.rollout() : plan.first(),
 				selfColor.getColorI(0xFF), targetColor.getColorI(0xFF));
 		else
 			PreviewRenderer.draw(matrixStack, start, rollout,
@@ -198,6 +302,35 @@ public final class SpearMacePreviewHack extends Hack
 				selfColor.getColorI(0x60), targetColor.getColorI(0x60));
 			PreviewRenderer.drawTrail(matrixStack, trail,
 				actualColor.getColorI(0xFF));
+		}
+		
+		Preview.Tree tree =
+			searchTree.isChecked() ? Preview.latestTree() : null;
+		if(tree != null)
+			TreeRenderer.draw(matrixStack, tree, treeColors.getSelected(),
+				showFailed.isChecked(), showRollouts.isChecked(),
+				maxEdges.getValueI());
+	}
+	
+	@Override
+	public void onRenderGUI(GuiGraphicsExtractor context, float partialTicks)
+	{
+		Preview.Tree tree = searchTree.isChecked() && searchInfo.isChecked()
+			? Preview.latestTree() : null;
+		if(tree == null)
+			return;
+		
+		Font font = MC.font;
+		List<String> lines = TreeRenderer.describe(tree);
+		int width = lines.stream().mapToInt(font::width).max().orElse(0);
+		int x = 2;
+		int y = context.guiHeight() / 4;
+		context.fill(x, y, x + width + 4, y + lines.size() * 10 + 2,
+			0x80000000);
+		for(String line : lines)
+		{
+			context.text(font, line, x + 2, y + 2, CommonColors.WHITE, false);
+			y += 10;
 		}
 	}
 }

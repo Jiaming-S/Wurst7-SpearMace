@@ -78,6 +78,7 @@ import net.wurstclient.hacks.spearmace.plan.Runner;
 import net.wurstclient.hacks.spearmace.plan.Trigger;
 import net.wurstclient.hacks.spearmace.plan.Runner.Entry;
 import net.wurstclient.hacks.spearmace.plan.Search;
+import net.wurstclient.hacks.spearmace.plan.SearchTrace.Edge;
 import net.wurstclient.hacks.spearmace.plan.eval.DamageRace;
 import net.wurstclient.hacks.spearmace.plan.search.BeamSearch;
 import net.wurstclient.hacks.spearmace.plan.search.Mcts;
@@ -89,6 +90,7 @@ import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
 import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
 import net.wurstclient.hacks.spearmace.state.SelfState;
+import net.wurstclient.hacks.spearmace.viz.Preview;
 import net.wurstclient.mixinterface.IKeyMapping;
 import net.wurstclient.util.Rotation;
 
@@ -940,6 +942,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		testCombatChain(context, server, failures);
 		testPlannerChain(context, server, failures);
 		testSearchComparison(context, server, failures);
+		testSearchTrace(context, server, failures);
 		testVerticalCatchNearTarget(context, server, failures);
 		testCirclingTarget(context, server, failures);
 		testTargetAbove(context, server, failures);
@@ -1374,6 +1377,65 @@ public final class SpearMaceTest implements FabricClientGameTest
 				name + ": never replanned on the target's path: " + history);
 		if(strikes < 2)
 			failures.add(name + ": only " + strikes + " strikes: " + history);
+	}
+	
+	/**
+	 * With the search tree shown, each search's tree has to hold every
+	 * action it tried from the root, and the plan it picked.
+	 */
+	private void testSearchTrace(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Search trace";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X + CIRCLE_RADIUS, GROUND_Y,
+			TARGET_Z, false);
+		standStill(server, golem);
+		runCommand(server,
+			"tp @p " + TARGET_X + " " + GROUND_Y + " " + TARGET_Z + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		for(Search search : List.<Search> of(new BeamSearch(4, 3),
+			new Mcts(60, 1, 1)))
+		{
+			String problem = context.computeOnClient(mc -> {
+				GameState now = GameState.capture(clientEntity(golem));
+				Preview.setTracing(true);
+				newPlanner(search, 50).replan(mc.level, now);
+				Preview.Tree tree = Preview.latestTree();
+				Preview.setTracing(false);
+				return checkTree(tree, new Options().of(mc.level, now).size(),
+					search instanceof BeamSearch);
+			});
+			LOGGER.info("SM: {} {}: {}", name,
+				search.getClass().getSimpleName(),
+				problem == null ? "ok" : problem);
+			if(problem != null)
+				failures.add(name + " (" + search.getClass().getSimpleName()
+					+ "): " + problem);
+		}
+	}
+	
+	/** What's wrong with {@code tree}, or {@code null}. */
+	private static String checkTree(Preview.Tree tree, int rootActions,
+		boolean allRootActions)
+	{
+		if(tree == null)
+			return "no tree";
+		List<Edge> edges = tree.edges();
+		long fromRoot = edges.stream().filter(e -> e.parent() < 0).count();
+		if(allRootActions ? fromRoot != rootActions : fromRoot == 0)
+			return fromRoot + " edges from the root, " + rootActions
+				+ " actions";
+		for(var o : tree.plan().expected())
+			if(edges.stream().noneMatch(e -> e.outcome() == o))
+				return "chosen " + o + " isn't in the tree";
+		for(Edge e : edges)
+			if(e.parent() >= 0
+				&& edges.get(e.parent()).depth() + 1 != e.depth())
+				return "edge " + e.index() + " has the wrong depth";
+		return null;
 	}
 	
 	/**

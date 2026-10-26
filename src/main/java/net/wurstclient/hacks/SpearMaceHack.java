@@ -61,22 +61,24 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 		SearchKind.values(), SearchKind.BEAM);
 	
 	private final SliderSetting beamWidth = new SliderSetting("Beam width",
-		"How many plans beam search keeps at each step.", 4, 1, 10, 1,
+		"How many plans beam search keeps at each step.", 4, 1, 32, 1,
 		ValueDisplay.INTEGER);
 	
 	private final SliderSetting lookahead = new SliderSetting("Lookahead",
-		"How many decision points beam search looks ahead.", 3, 1, 6, 1,
+		"How many decision points beam search looks ahead.", 3, 1, 12, 1,
 		ValueDisplay.INTEGER);
 	
 	private final SliderSetting iterations = new SliderSetting(
 		"MCTS iterations", "The most iterations MCTS runs per decision.", 60,
-		10, 300, 10, ValueDisplay.INTEGER);
+		10, 5000, 10, ValueDisplay.INTEGER);
 	
 	private final SliderSetting budget = new SliderSetting("Time budget",
 		"How long a search may think at each decision point. Beam search"
 			+ " and MCTS always finish their first step, so they can take"
-			+ " longer.",
-		50, 5, 200, 5, ValueDisplay.INTEGER.withSuffix(" ms"));
+			+ " longer. Above 50 ms, the game slows down unless its tick"
+			+ " rate is lowered, which is meant for watching the search in"
+			+ " SpearMacePreview.",
+		50, 5, 5000, 5, ValueDisplay.INTEGER.withSuffix(" ms"));
 	
 	private final SliderSetting range =
 		new SliderSetting("Range", "How far away SpearMace looks for targets.",
@@ -240,6 +242,15 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 		return new Planner(TargetModel.ballistic(), new Options(),
 			new DefaultController(), search, new DamageRace(c.weights()),
 			c.budget());
+	}
+	
+	/**
+	 * A new planner with the current settings, for SpearMacePreview's dry
+	 * run.
+	 */
+	public Planner newPlanner()
+	{
+		return planner(config());
 	}
 	
 	/** The target, for tests and other hacks. {@code null} if none. */
