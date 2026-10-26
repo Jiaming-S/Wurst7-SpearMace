@@ -98,7 +98,12 @@ public final class ActionRunner implements UpdateListener
 	 */
 	public void enqueueAnyway(Action action)
 	{
-		queue.add(new Queued(action, StartCondition.immediately(), false));
+		enqueueAnyway(action, StartCondition.immediately());
+	}
+	
+	public void enqueueAnyway(Action action, StartCondition condition)
+	{
+		queue.add(new Queued(action, condition, false));
 	}
 	
 	public void enqueue(Action action)
@@ -109,6 +114,12 @@ public final class ActionRunner implements UpdateListener
 	public boolean isIdle()
 	{
 		return current == null && queue.isEmpty();
+	}
+	
+	/** The action that is running, or {@code null}. */
+	public Action current()
+	{
+		return current;
 	}
 	
 	public List<Result> results()

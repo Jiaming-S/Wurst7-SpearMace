@@ -101,7 +101,9 @@ import net.wurstclient.util.Rotation;
  * Set it to {@code movement} or {@code combat} to run only that group.
  * The far-away target scenarios are harder and only run when it is set to
  * {@code hard}, and the pearl catches with movement keys held only when it
- * is set to {@code keys} ({@code all} runs everything).
+ * is set to {@code keys} ({@code all} runs everything). {@code catchdata}
+ * collects pearl catch training data instead, see
+ * {@link CatchDataCollector}; {@code all} leaves it out.
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
@@ -160,7 +162,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private double targetHealth;
 	private ShieldDummy shieldDummy;
 	
-	private static final List<String> OPT_IN_GROUPS = List.of("hard", "keys");
+	private static final List<String> OPT_IN_GROUPS =
+		List.of("hard", "keys", "catchdata");
 	
 	public static boolean isEnabled()
 	{
@@ -250,6 +253,10 @@ public final class SpearMaceTest implements FabricClientGameTest
 			
 			if(runs("keys"))
 				testCatchesHoldingKeys(context, server, failures);
+			
+			if("catchdata".equals(System.getenv("WURST_SPEARMACE_TEST")))
+				new CatchDataCollector(context, server,
+					() -> reset(context, server)).collect();
 		}
 		
 		for(NamedReport r : replays)

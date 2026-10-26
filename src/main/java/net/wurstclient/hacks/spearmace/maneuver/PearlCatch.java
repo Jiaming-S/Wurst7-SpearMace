@@ -48,8 +48,12 @@ import net.wurstclient.util.Rotation;
  * @param delay
  *            updates between the pearl click and the wind charge click, at
  *            least 1, or {@link #AUTO}
+ * @param minChance
+ *            catches less likely than this are refused, {@link #MIN_CHANCE}
+ *            unless data collection wants unlikely catches thrown too
  */
-public record PearlCatch(Rotation pearlAim, int delay) implements Action
+public record PearlCatch(Rotation pearlAim, int delay, double minChance)
+	implements Action
 {
 	/** Catches less likely than this are refused. */
 	public static final double MIN_CHANCE = 0.5;
@@ -91,6 +95,34 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 			delay = Math.max(1, delay);
 	}
 	
+	public PearlCatch(Rotation pearlAim, int delay)
+	{
+		this(pearlAim, delay, MIN_CHANCE);
+	}
+	
+	/**
+	 * A catch whose pearl was thrown, as seen between updates, for data
+	 * collection. {@code plan} and {@code chance} are the latest aim,
+	 * {@code last} the state of the latest update.
+	 */
+	public interface InFlight
+	{
+		public int delay();
+		
+		public int clickTick();
+		
+		public Plan plan();
+		
+		public PearlInfo info();
+		
+		public double chance();
+		
+		/** When the wind charge was clicked, or -1. */
+		public int chargeTick();
+		
+		public SelfState last();
+	}
+	
 	/** Picks the most reliable delay (see {@link #bestDelay}). */
 	public static PearlCatch mostReliable(Rotation pearlAim)
 	{
@@ -129,7 +161,7 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 		if(expected == null)
 			return Step.fail(
 				"no wind charge aim catches the pearl after " + d + " ticks");
-		if(expected.pSuccess() < MIN_CHANCE)
+		if(expected.pSuccess() < minChance)
 			return Step.fail(String.format("delay %d is out of range (p=%.2f)",
 				d, expected.pSuccess()));
 		
@@ -266,7 +298,7 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 	private record Flying(String name, int delay, int clickTick, int chargeSlot,
 		int prevSlot, Plan plan, PearlInfo info, double chance, int chargeTick,
 		Set<Integer> oldPearls, PearlInFlight pearl, int pearlTick,
-		SelfState last) implements Action
+		SelfState last) implements Action, InFlight
 	{
 		@Override
 		public Step next(Level level, GameState s)

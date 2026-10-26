@@ -34,3 +34,6 @@ hs_err_pid*
 *.pyc
 
 desktop.ini
+
+# SpearMace pearl catch training data
+spearmace-catchdata/
