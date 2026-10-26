@@ -20,9 +20,9 @@ package net.wurstclient.hacks.spearmace.plan.eval;
  *            per tick, so that the same damage sooner is better
  * @param height
  *            per block of the player's feet above the target's eyes, which
- *            the next smash turns into damage
+ *            the next smash turns into damage, negative below them
  * @param maxHeight
- *            height above this isn't worth more
+ *            heights beyond this, up or down, don't count more
  * @param ready
  *            for a wind charge being ready, to launch again
  * @param distance

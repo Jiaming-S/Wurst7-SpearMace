@@ -27,6 +27,7 @@ import net.wurstclient.hacks.spearmace.action.Step.Failed;
 import net.wurstclient.hacks.spearmace.action.Step.Run;
 import net.wurstclient.hacks.spearmace.input.KeyInput;
 import net.wurstclient.hacks.spearmace.model.Tracker;
+import net.wurstclient.hacks.spearmace.model.Transition;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.viz.Preview;
 
@@ -83,8 +84,8 @@ public final class Runner implements UpdateListener
 	public void onUpdate()
 	{
 		GameState now = tracker.observe(target.get());
-		EnumSet<Trigger> triggers =
-			Triggers.detect(previous, now, tracker.predicted());
+		EnumSet<Trigger> triggers = Triggers.detect(previous, now,
+			tracker.predicted(), execution.planned(now.self().tick()));
 		if(!triggers.isEmpty())
 			execution.interrupt(MC.level, now, triggers);
 		if(execution.isDone())
@@ -161,6 +162,7 @@ public final class Runner implements UpdateListener
 	private final class Execution
 	{
 		private final Plan plan;
+		private final int planTick;
 		private int index;
 		private Action current;
 		private String name;
@@ -170,12 +172,26 @@ public final class Runner implements UpdateListener
 		private Execution(Plan plan, int tick)
 		{
 			this.plan = plan;
+			planTick = tick;
 			startTick = tick;
 			if(!plan.actions().isEmpty())
 			{
 				current = plan.actions().getFirst();
 				name = current.name();
 			}
+		}
+		
+		/**
+		 * What the plan expected at {@code tick}, as long as its first
+		 * action runs, or {@code null}.
+		 */
+		private GameState planned(int tick)
+		{
+			if(current == null || index > 0 || plan.expected().isEmpty())
+				return null;
+			List<Transition> steps = plan.expected().getFirst().steps();
+			int i = tick - planTick - 1;
+			return i >= 0 && i < steps.size() ? steps.get(i).next() : null;
 		}
 		
 		private boolean isDone()

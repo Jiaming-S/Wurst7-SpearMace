@@ -29,7 +29,10 @@ import net.wurstclient.hacks.spearmace.state.TargetState;
  * see clicks the server hasn't handled yet or velocity changes on their
  * way, and it shows the player's projectiles a few ticks late. So those
  * come from the prediction, and the client's view of a projectile is only
- * used once, to correct its random spread when it first shows up.
+ * used once, to correct its random spread when it first shows up. A pearl
+ * that the client keeps showing after the prediction lost it, such as one
+ * that was predicted to hit a wind charge but missed it, is taken as the
+ * client shows it, so that its landing teleport isn't a surprise.
  *
  * <p>
  * The server doesn't always take the same number of ticks, so velocity
@@ -48,6 +51,12 @@ public enum Observer
 	 * showing it was never really thrown, or was removed some other way.
 	 */
 	private static final int MAX_UNSEEN_AGE = 6;
+	
+	/**
+	 * The client counts a projectile's age from when it showed up, which
+	 * can be a tick after the server spawned it in the prediction.
+	 */
+	private static final int AGE_SLACK = 1;
 	
 	/**
 	 * @param predicted
@@ -82,7 +91,9 @@ public enum Observer
 	 * The predicted pending effects, with projectiles matched to the
 	 * client's view. Projectiles the client stopped showing are gone, as
 	 * the client shows removals later than the server makes them, and so
-	 * are projectiles it never showed although it should have by now.
+	 * are projectiles it never showed although it should have by now. Old
+	 * pearls that only the client knows about are added, unless a teleport
+	 * is on its way, as the client still shows the pearl that caused it.
 	 */
 	private static List<Pending> merge(List<Pending> predicted,
 		List<Pending> seen)
@@ -115,19 +126,30 @@ public enum Observer
 			}else if(!isProjectile(p) || age(p) <= MAX_UNSEEN_AGE)
 				merged.add(p);
 		}
+		
+		boolean teleporting =
+			predicted.stream().anyMatch(Teleport.class::isInstance);
+		if(!teleporting)
+			for(Pending s : seen)
+				if(s instanceof PearlInFlight pearl
+					&& pearl.age() > MAX_UNSEEN_AGE
+					&& !bound.contains(pearl.entityId()))
+					merged.add(pearl);
 		return merged;
 	}
 	
 	/**
 	 * The client's view of the unseen projectile {@code p}, moved forward to
-	 * the predicted age, or {@code null} if it doesn't show it yet.
+	 * the predicted age, or {@code null} if it doesn't show it yet. Older
+	 * projectiles the client shows can't be {@code p}, even if the
+	 * prediction lost track of them.
 	 */
 	private static Pending firstSighting(Pending p, List<Pending> seen,
 		HashSet<Integer> bound)
 	{
 		for(Pending s : seen)
 		{
-			if(bound.contains(entityId(s)))
+			if(bound.contains(entityId(s)) || !couldBe(s, p))
 				continue;
 			
 			if(p instanceof PearlInFlight pearl && s instanceof PearlInFlight c)
@@ -221,6 +243,13 @@ public enum Observer
 	{
 		double size = change.length();
 		return size > 0.1 && residual.subtract(change).length() < size / 2;
+	}
+	
+	/** Whether the client's {@code seen} is young enough to be {@code p}. */
+	private static boolean couldBe(Pending seen, Pending p)
+	{
+		int behind = age(p) - age(seen);
+		return behind >= -AGE_SLACK && behind <= MAX_UNSEEN_AGE;
 	}
 	
 	private static boolean isProjectile(Pending p)

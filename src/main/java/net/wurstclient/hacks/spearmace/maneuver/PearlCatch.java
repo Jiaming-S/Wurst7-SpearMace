@@ -17,7 +17,6 @@ import net.minecraft.world.phys.Vec3;
 import net.wurstclient.hacks.spearmace.action.Action;
 import net.wurstclient.hacks.spearmace.action.Prediction;
 import net.wurstclient.hacks.spearmace.action.Step;
-import net.wurstclient.hacks.spearmace.action.Step.Run;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatchPlanner.PearlInfo;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatchPlanner.Plan;
 import net.wurstclient.hacks.spearmace.model.TickInput;
@@ -113,6 +112,10 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 		String reason = checkItems(kit);
 		if(reason != null)
 			return Step.fail(reason);
+		
+		// its teleport would cut this catch short
+		if(!self.pending(PearlInFlight.class).isEmpty())
+			return Step.fail("a pearl is still in the air");
 		
 		int d = delay == AUTO ? bestDelay(level, self, pearlAim, MAX_AUTO_DELAY)
 			: delay;
@@ -320,8 +323,8 @@ public record PearlCatch(Rotation pearlAim, int delay) implements Action
 					info, plan == this.plan ? chance : plan.pSuccess(),
 					chargeTick, oldPearls, seen != null ? seen : pearl,
 					seen != null ? tick : pearlTick, self);
-			Run run = Step.run(input, then);
-			return this.chargeTick < 0 ? run.asCommitted() : run;
+			// nothing else can be done until the pearl lands or is caught
+			return Step.run(input, then).asCommitted();
 		}
 		
 		@Override

@@ -72,6 +72,7 @@ import net.wurstclient.hacks.spearmace.plan.DefaultController;
 import net.wurstclient.hacks.spearmace.plan.Options;
 import net.wurstclient.hacks.spearmace.plan.Planner;
 import net.wurstclient.hacks.spearmace.plan.Runner;
+import net.wurstclient.hacks.spearmace.plan.Trigger;
 import net.wurstclient.hacks.spearmace.plan.Runner.Entry;
 import net.wurstclient.hacks.spearmace.plan.Search;
 import net.wurstclient.hacks.spearmace.plan.eval.DamageRace;
@@ -126,6 +127,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private static final double FAR_SPEED = 0.1;
 	private static final int FAR_TICKS = 600;
 	private static final int BOUNCE_COOLDOWN = 10;
+	
+	/** The target that strafes around the player. */
+	private static final double CIRCLE_RADIUS = 2.5;
+	private static final double CIRCLE_SPEED = 0.2;
+	
+	/** How far above the ground the raised target stands. */
+	private static final int PLATFORM_HEIGHT = 6;
 	
 	private static final Rotation UP = new Rotation(0, -90);
 	private static final Rotation DIAGONAL = new Rotation(0, -30);
@@ -221,6 +229,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 				testLungesWhileFalling(context, server, failures);
 				testChain(context, server, failures);
 				testInfeasibleCatch(context, server, failures);
+				testCatchWithOrphanPearl(context, server, failures);
+				testCatchWithStrayPearls(context, server, failures);
 			}
 			
 			// watch the combat scenarios from behind
@@ -702,6 +712,96 @@ public final class SpearMaceTest implements FabricClientGameTest
 	}
 	
 	/**
+	 * A pearl that the model never predicted, like one that was predicted
+	 * to hit its wind charge but missed it, is still flying. A new catch
+	 * waits for its teleport instead of taking it for the new pearl, and
+	 * works once it has landed.
+	 */
+	private void testCatchWithOrphanPearl(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Catch with orphan pearl";
+		reset(context, server);
+		
+		// thrown steeply, so it flies for a few seconds
+		context.runOnClient(mc -> {
+			KeyInput.look(new Rotation(0, -80));
+			KeyInput.selectSlot(3);
+			KeyInput.clickUse();
+		});
+		context.waitTicks(25);
+		if(countFlyingPearls(context) == 0)
+		{
+			failures.add(name + ": the orphan pearl isn't flying");
+			return;
+		}
+		
+		List<Result> refused = run(context, name + " while flying", 20,
+			r -> r.enqueue(new PearlCatch(DIAGONAL, 3)));
+		Result r = refused.isEmpty() ? null : refused.get(0);
+		LOGGER.info("SM: {} while flying {}", name, r);
+		if(r == null || r.status() != Status.FAILED
+			|| !r.reason().contains("a pearl is still in the air"))
+			failures.add(name + ": catch wasn't refused: " + r);
+		
+		for(int i = 0; i < 150 && countFlyingPearls(context) > 0; i++)
+			context.waitTick();
+		context.waitTicks(10);
+		
+		List<Result> results = run(context, name + " after landing", 150,
+			c -> c.enqueue(new PearlCatch(DIAGONAL, 3)));
+		Result c = results.isEmpty() ? null : results.getLast();
+		Caught caught = c == null ? null : c.payload(Caught.class);
+		double error = caught == null ? Double.NaN
+			: caught.teleportedTo().distanceTo(c.prediction().endPos());
+		LOGGER.info("SM: {} after landing {} error={}", name, c, fmt(error));
+		if(caught == null || error > 1.5)
+			failures.add(name + ": no accurate catch after landing: " + c);
+	}
+	
+	/**
+	 * Pearls the player doesn't own fly next to the catch's pearl, two
+	 * blocks to each side, and show up on the client at the same time. The
+	 * wind charge has to go to the player's own pearl, or that pearl flies
+	 * on uncaught.
+	 */
+	private void testCatchWithStrayPearls(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		// the catch's pearl at DIAGONAL, see Shots.velocity()
+		String motion = "{Motion:[0.0d,0.75d,1.3d]}";
+		int trials = 3;
+		int successes = 0;
+		for(int i = 0; i < trials; i++)
+		{
+			String name = "Catch with stray pearls #" + (i + 1);
+			reset(context, server);
+			runCommand(server, "summon ender_pearl 2.5 -58.48 0.5 " + motion);
+			runCommand(server, "summon ender_pearl -1.5 -58.48 0.5 " + motion);
+			
+			List<Result> results = run(context, name, 150,
+				r -> r.enqueue(new PearlCatch(DIAGONAL, 3)));
+			Result c = results.isEmpty() ? null : results.getLast();
+			Caught caught = c == null ? null : c.payload(Caught.class);
+			double error = caught == null ? Double.NaN
+				: caught.teleportedTo().distanceTo(c.prediction().endPos());
+			LOGGER.info("SM: {} {} error={}", name, c, fmt(error));
+			if(caught != null && error <= 1.5)
+				successes++;
+		}
+		
+		if(successes < trials - 1)
+			failures.add("Catch with stray pearls: only " + successes + "/"
+				+ trials + " accurate catches");
+	}
+	
+	private static int countFlyingPearls(ClientGameTestContext context)
+	{
+		return context.computeOnClient(
+			mc -> SelfState.capture().pending(PearlInFlight.class).size());
+	}
+	
+	/**
 	 * Diagonal pearl catches with movement keys held, so the pearl and the
 	 * wind charge leave from different places: walking on the ground, and
 	 * drifting after a wind charge launch. "R" is sprint.
@@ -829,6 +929,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 		testCombatChain(context, server, failures);
 		testPlannerChain(context, server, failures);
 		testSearchComparison(context, server, failures);
+		testVerticalCatchNearTarget(context, server, failures);
+		testCirclingTarget(context, server, failures);
+		testTargetAbove(context, server, failures);
 		testHack(context, server, failures);
 	}
 	
@@ -1076,8 +1179,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		LOGGER.info("SM: {} {} strikes, damage actual={} predicted={}", name,
 			strikes.size(), fmt(damage), fmt(predicted));
 		
-		if(history.isEmpty()
-			|| !history.getFirst().name().startsWith("WindChargeJump"))
+		if(history.isEmpty() || !isLaunch(history.getFirst()))
 			failures.add(name + ": didn't start with a launch: " + history);
 		if(strikes.size() < 2)
 			failures.add(
@@ -1182,6 +1284,134 @@ public final class SpearMaceTest implements FabricClientGameTest
 		LOGGER.info("SM: search comparison {}", summary);
 	}
 	
+	private static boolean isLaunch(Entry e)
+	{
+		return e.name().startsWith("WindChargeJump")
+			|| e.name().startsWith("PearlCatch");
+	}
+	
+	/**
+	 * Next to the target on the ground, a pearl catch straight up gains
+	 * more height than a wind charge launch, so it should come first.
+	 */
+	private void testVerticalCatchNearTarget(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Vertical catch next to target";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		List<Entry> history =
+			runPlanner(context, name, 300, newPlanner(new BeamSearch(4, 3), 50),
+				h -> h.stream().anyMatch(SpearMaceTest::isStrike));
+		
+		List<Entry> moves = movesBeforeFirstStrike(history);
+		LOGGER.info("SM: {} damage={} moves {}", name,
+			fmt(initialHealth - targetHealth), moves);
+		if(moves.stream()
+			.noneMatch(e -> e.name().startsWith("PearlCatch")
+				&& e.name().contains("pitch=-90.0")
+				&& e.status() == Runner.Status.DONE))
+			failures.add(
+				name + ": no vertical catch before the strike: " + history);
+		if(history.stream().noneMatch(SpearMaceTest::isStrike))
+			failures.add(name + ": never struck: " + history);
+	}
+	
+	/**
+	 * A target that keeps strafing in a circle around the player, which
+	 * the straight-line target model can't predict, so the plan has to be
+	 * redone whenever the target leaves its expected path.
+	 */
+	private void testCirclingTarget(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Circling target";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X + CIRCLE_RADIUS, GROUND_Y,
+			TARGET_Z, false);
+		standStill(server, golem);
+		runCommand(server,
+			"tp @p " + TARGET_X + " " + GROUND_Y + " " + TARGET_Z + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		Planner planner = newPlanner(new BeamSearch(4, 3), 50);
+		List<Entry> history = runPlanner(context, name, 300, planner,
+			h -> h.stream().filter(SpearMaceTest::isStrike).count() >= 2,
+			mc -> circle(mc, golem));
+		
+		long strikes = history.stream().filter(SpearMaceTest::isStrike).count();
+		long diverged = history.stream()
+			.filter(e -> e.status() == Runner.Status.INTERRUPTED
+				&& e.reason() != null
+				&& e.reason().contains(Trigger.TARGET_DIVERGED.name()))
+			.count();
+		LOGGER.info("SM: {} strikes={} target divergences={} damage={}", name,
+			strikes, diverged, fmt(initialHealth - targetHealth));
+		if(diverged == 0)
+			failures.add(
+				name + ": never replanned on the target's path: " + history);
+		if(strikes < 2)
+			failures.add(name + ": only " + strikes + " strikes: " + history);
+	}
+	
+	/** Walks the golem around the server player, keeping the radius. */
+	private static void circle(MinecraftServer mc, int golem)
+	{
+		if(!(mc.overworld().getEntity(golem) instanceof LivingEntity g))
+			return;
+		Vec3 p = getServerPlayer(mc).position();
+		Vec3 out = new Vec3(g.getX() - p.x, 0, g.getZ() - p.z);
+		double r = out.length();
+		if(r < 1e-3)
+			return;
+		Vec3 radial = out.scale(1 / r);
+		Vec3 tangent = new Vec3(-radial.z, 0, radial.x);
+		Vec3 vel = tangent.scale(CIRCLE_SPEED)
+			.add(radial.scale((CIRCLE_RADIUS - r) * 0.2));
+		g.setDeltaMovement(vel.x, g.getDeltaMovement().y, vel.z);
+	}
+	
+	/**
+	 * A target standing on a platform above the player, who has to get
+	 * back above it before striking.
+	 */
+	private void testTargetAbove(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Target above";
+		reset(context, server);
+		int top = (int)GROUND_Y + PLATFORM_HEIGHT;
+		String platform =
+			"-1 " + (top - 1) + " " + (int)Math.floor(TARGET_Z - 1) + " 1 "
+				+ (top - 1) + " " + (int)Math.floor(TARGET_Z + 1);
+		runCommand(server, "fill " + platform + " stone");
+		int golem = spawnGolem(server, TARGET_X, top, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 3) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		List<Entry> history =
+			runPlanner(context, name, 400, newPlanner(new BeamSearch(4, 3), 50),
+				h -> h.stream().anyMatch(SpearMaceTest::isStrike));
+		runCommand(server, "fill " + platform + " air");
+		
+		List<Entry> moves = movesBeforeFirstStrike(history);
+		LOGGER.info("SM: {} damage={} moves {}", name,
+			fmt(initialHealth - targetHealth), moves);
+		if(moves.isEmpty() || !moves.getFirst().name().startsWith("PearlCatch"))
+			failures.add(
+				name + ": didn't climb with a pearl catch first: " + history);
+		if(history.stream().noneMatch(SpearMaceTest::isStrike))
+			failures.add(name + ": never struck: " + history);
+	}
+	
 	private void runHardTests(ClientGameTestContext context,
 		TestServerContext server, List<String> failures)
 	{
@@ -1198,6 +1428,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 	/**
 	 * A target too far away for any single movement technique, so the
 	 * planner has to chain at least two different ones before it strikes.
+	 * Pearl catches at different pitches (diagonal, steep, straight up)
+	 * count as different techniques.
 	 */
 	private void testFarTarget(ClientGameTestContext context,
 		TestServerContext server, List<String> failures)
@@ -1208,7 +1440,8 @@ public final class SpearMaceTest implements FabricClientGameTest
 		List<Entry> history = runFar(context, name, failures, mc -> {});
 		
 		List<String> kinds = movesBeforeFirstStrike(history).stream()
-			.map(e -> e.name().replaceAll("\\(.*", "")).distinct().toList();
+			.map(e -> e.name().replaceAll("yaw=[^,]*, |, delay=[^)]*", ""))
+			.distinct().toList();
 		LOGGER.info("SM: {} moved with {}", name, kinds);
 		if(kinds.size() < 2)
 			failures.add(name + ": chained only " + kinds

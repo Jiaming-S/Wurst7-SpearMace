@@ -32,12 +32,21 @@ public enum Triggers
 	private static final double DIVERGENCE = 0.5;
 	
 	/**
+	 * Targets this far (horizontally) from where the plan expected them
+	 * make the plan stale.
+	 */
+	private static final double TARGET_DIVERGENCE = 1;
+	
+	/**
 	 * @param expected
 	 *            what the model predicted for {@code now}, or {@code null}
 	 *            to skip the divergence check
+	 * @param planned
+	 *            what the current plan expected for {@code now}, or
+	 *            {@code null} to skip the target divergence check
 	 */
 	public static EnumSet<Trigger> detect(GameState prev, GameState now,
-		GameState expected)
+		GameState expected, GameState planned)
 	{
 		EnumSet<Trigger> triggers = EnumSet.noneOf(Trigger.class);
 		if(prev == null)
@@ -62,6 +71,14 @@ public enum Triggers
 		else if(ta != null && ta.shieldRaised() != tb.shieldRaised())
 			triggers.add(
 				tb.shieldRaised() ? Trigger.SHIELD_UP : Trigger.SHIELD_DOWN);
+			
+		// a one-tick prediction can't see a curving path, so the target is
+		// compared with the plan's prediction from where it was made
+		if(tb != null && planned != null && planned.target() != null
+			&& planned.target().entityId() == tb.entityId()
+			&& planned.target().pos().subtract(tb.pos())
+				.horizontalDistance() > TARGET_DIVERGENCE)
+			triggers.add(Trigger.TARGET_DIVERGED);
 		
 		if(expected != null
 			&& expected.self().pos().distanceTo(b.pos()) > DIVERGENCE)

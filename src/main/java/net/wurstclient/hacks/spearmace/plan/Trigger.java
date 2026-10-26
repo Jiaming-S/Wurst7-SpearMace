@@ -31,5 +31,11 @@ public enum Trigger
 	TARGET_CHANGED,
 	
 	/** The player isn't where the model expected. */
-	DIVERGED;
+	DIVERGED,
+	
+	/**
+	 * The target left the path the plan expected, such as by strafing
+	 * around the player.
+	 */
+	TARGET_DIVERGED;
 }

@@ -171,11 +171,16 @@ public record MaceStrike(PreItem pre) implements Action
 				return Step.fail("hotbar didn't switch to the mace");
 			
 			// raise the pre-item again for the next strike
-			return Step.idle(new Confirm(this)).withSlot(track.preSlot());
+			return Step.idle(new Confirm(this)).withSlot(track.preSlot())
+				.asCommitted();
 		}
 	}
 	
-	/** Waiting for the Wind Burst launch, or trying again without it. */
+	/**
+	 * Waiting for the Wind Burst launch, or trying again without it. The
+	 * wait is committed: a hit close to the ground lands before the launch
+	 * shows up, and a new plan made then would throw the launch away.
+	 */
 	private record Confirm(Swung swung) implements Action
 	{
 		@Override
@@ -195,7 +200,7 @@ public record MaceStrike(PreItem pre) implements Action
 						swung.expectedLaunch(), velY, swung.attempts()));
 			
 			if(self.tick() - swung.strikeTick() <= CONFIRM_TIMEOUT)
-				return Step.idle(this).holding(Channel.HOTBAR);
+				return Step.idle(this).holding(Channel.HOTBAR).asCommitted();
 			
 			if(swung.attempts() >= MAX_ATTEMPTS)
 				return Step.fail("no Wind Burst launch after "

@@ -56,8 +56,9 @@ public final class ModelProblem implements SearchProblem
 	@Override
 	public Outcome play(GameState s, Action a)
 	{
-		Rollout rollout = Rollout.of(model, s, a, MAX_TICKS, controller,
-			(before, after) -> !Triggers.detect(before, after, null).isEmpty());
+		Rollout rollout = Rollout.of(model, s, a, MAX_TICKS, controller, (
+			before,
+			after) -> !Triggers.detect(before, after, null, null).isEmpty());
 		return Outcome.of(a, rollout);
 	}
 	

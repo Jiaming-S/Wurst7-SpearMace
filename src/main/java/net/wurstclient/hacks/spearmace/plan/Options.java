@@ -33,13 +33,17 @@ import net.wurstclient.util.Rotation;
  * The actions worth trying from a state, in the order the rules prefer
  * them:
  * <ul>
+ * <li>below the target: pearl catches straight up and steeply toward it,
+ * to get above it again</li>
  * <li>far from the target: pearl catches toward it, a lunge toward it,
  * or a launch for height, running forward or straight up</li>
  * <li>in the air: drift toward the target</li>
  * <li>rising: wait for the apex</li>
- * <li>on the ground near the target: launch with a wind charge</li>
+ * <li>on the ground near the target: a pearl catch straight up, or a
+ * launch with a wind charge</li>
  * <li>falling near the target: {@link StrikeSelector}'s pick, then the
- * other strikes</li>
+ * other strikes, then a pearl catch straight up if the fall is still
+ * short</li>
  * </ul>
  * Every list ends with a {@link Hold}, which always works.
  */
@@ -58,6 +62,25 @@ public final class Options
 	private static final float[] CATCH_PITCHES = {-30, -45};
 	private static final int CATCH_DELAY = 3;
 	
+	/**
+	 * Straight up. Longer delays catch only a little higher and miss more
+	 * often, so this uses the approach's delay too.
+	 */
+	private static final float VERTICAL_PITCH = -90;
+	
+	/**
+	 * Up to this height above the target's eyes, more height adds a lot of
+	 * smash damage (4 per block for 3 blocks, then 2 for 5 blocks); above
+	 * it, only 1 per block.
+	 */
+	private static final double LOW = 8;
+	
+	/**
+	 * Target feet higher than the player's feet by more than this means
+	 * the player has to get above it again first.
+	 */
+	private static final double ABOVE = 2;
+	
 	private static final int HOLD = 10;
 	private static final int HOLD_RISING = 40;
 	
@@ -66,6 +89,8 @@ public final class Options
 		ArrayList<Action> actions = new ArrayList<>();
 		SelfState self = s.self();
 		boolean far = s.targetAlive() && horizontalDistance(s) > LAUNCH_RANGE;
+		if(s.targetAlive() && below(s) && !(self.vel().y > RISING))
+			addClimb(s, actions);
 		if(!s.targetAlive())
 			actions.add(new Hold("no target", HOLD));
 		else if(self.vel().y > RISING)
@@ -81,15 +106,23 @@ public final class Options
 		{
 			if(far)
 				addApproach(s, actions, true);
-			else if(self.kit().windCharge() >= 0)
-				actions.add(WindChargeJump.atFeet(false));
+			else
+			{
+				addVerticalCatch(s, actions);
+				if(self.kit().windCharge() >= 0)
+					actions.add(WindChargeJump.atFeet(false));
+			}
 			actions.add(new Hold("on the ground", HOLD));
 		}else
 		{
 			if(far)
 				addApproach(s, actions, true);
 			else
+			{
 				addStrikes(level, s, actions);
+				if(height(s) < LOW)
+					addVerticalCatch(s, actions);
+			}
 			actions.add(new Drift(HOLD));
 			actions.add(new Hold("falling", HOLD));
 		}
@@ -105,10 +138,11 @@ public final class Options
 	{
 		Kit kit = s.self().kit();
 		float yaw = towardYaw(s);
-		if(pearls && kit.enderPearl() >= 0 && kit.windCharge() >= 0)
+		if(pearls && canCatch(kit))
 			for(float pitch : CATCH_PITCHES)
-				actions
-					.add(new PearlCatch(new Rotation(yaw, pitch), CATCH_DELAY));
+				addIfNew(actions,
+					new PearlCatch(new Rotation(yaw, pitch), CATCH_DELAY),
+					true);
 		if(kit.lungeSpear() >= 0 && kit.hand() >= 0)
 			actions.add(new SpearLunge(yaw, 0));
 		if(s.self().onGround() && kit.windCharge() >= 0)
@@ -116,6 +150,43 @@ public final class Options
 			actions.add(WindChargeJump.forward(yaw));
 			actions.add(WindChargeJump.atFeet(false));
 		}
+	}
+	
+	private static void addVerticalCatch(GameState s, List<Action> actions)
+	{
+		addIfNew(actions,
+			new PearlCatch(new Rotation(towardYaw(s), VERTICAL_PITCH),
+				CATCH_DELAY),
+			canCatch(s.self().kit()));
+	}
+	
+	/**
+	 * Ways back above a target that is higher up: straight up, or steeply
+	 * toward it.
+	 */
+	private static void addClimb(GameState s, List<Action> actions)
+	{
+		addVerticalCatch(s, actions);
+		addIfNew(actions,
+			new PearlCatch(new Rotation(towardYaw(s), CATCH_PITCHES[1]),
+				CATCH_DELAY),
+			canCatch(s.self().kit()));
+	}
+	
+	private static boolean canCatch(Kit kit)
+	{
+		return kit.enderPearl() >= 0 && kit.windCharge() >= 0;
+	}
+	
+	private static boolean below(GameState s)
+	{
+		return s.target().pos().y - s.self().pos().y > ABOVE;
+	}
+	
+	/** Feet above the target's eyes. */
+	private static double height(GameState s)
+	{
+		return s.self().pos().y - s.target().eyePos().y;
 	}
 	
 	private static float towardYaw(GameState s)

@@ -17,9 +17,10 @@ import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
  * Expected damage dealt, minus what it cost: fall damage, items and time.
- * A state is worth the height the next smash can use, a wind charge to
- * launch again with, and being close enough to strike. A pending pearl
- * teleport counts as already being there.
+ * A state is worth the height the next smash can use (and loses as much
+ * for being below the target), a wind charge to launch again with, and
+ * being close enough to strike. A pending pearl teleport counts as already
+ * being there.
  */
 public final class DamageRace implements Evaluator
 {
@@ -59,7 +60,8 @@ public final class DamageRace implements Evaluator
 				pos = t.to();
 			
 		double height = pos.y - s.target().eyePos().y;
-		double value = w.height() * Math.clamp(height, 0, w.maxHeight());
+		double value =
+			w.height() * Math.clamp(height, -w.maxHeight(), w.maxHeight());
 		if(self.kit().windCharge() >= 0)
 			value += w.ready();
 		double gap = pos.subtract(s.target().pos()).horizontalDistance();
