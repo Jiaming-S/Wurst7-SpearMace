@@ -104,6 +104,8 @@ public sealed interface Pending
 	 *
 	 * @param damage
 	 *            before armor
+	 * @param crit
+	 *            whether {@code damage} includes the critical hit multiplier
 	 * @param smash
 	 *            whether it is a mace smash, which resets the fall distance
 	 *            and launches the player
@@ -114,8 +116,8 @@ public sealed interface Pending
 	 * @param feet
 	 *            where the server thinks the player is
 	 */
-	public record ServerAttack(double damage, boolean smash, double launchVelY,
-		int disableShieldTicks, Vec3 feet) implements Pending
+	public record ServerAttack(double damage, boolean crit, boolean smash,
+		double launchVelY, int disableShieldTicks, Vec3 feet) implements Pending
 	{}
 	
 	/** A spear jab that the server handles in the next server tick. */

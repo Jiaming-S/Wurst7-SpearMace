@@ -347,10 +347,16 @@ public final class TickSim
 				return;
 			}
 			
+			// after the move that lands, the server counts the player as on
+			// the ground but hasn't reset the fall distance yet, so the hit
+			// still smashes but isn't a crit (measured)
+			double damage = attack.damage();
+			if(attack.crit() && onGround)
+				damage /= StrikeModel.CRIT_MULTIPLIER;
+			
 			target = target.withHurt();
-			pending.add(
-				new TargetDamage(serverTick + MOTION_DELAY, attack.damage()));
-			damageDealt += attack.damage();
+			pending.add(new TargetDamage(serverTick + MOTION_DELAY, damage));
+			damageDealt += damage;
 			events.add(Event.STRUCK);
 			
 			// MaceItem.postHurtEnemy() resets the server's fall distance
@@ -523,8 +529,9 @@ public final class TickSim
 		 */
 		private ServerAttack strike(ItemStack picked, ItemStack held)
 		{
+			// the server's charge is a tick behind (measured)
 			double strength =
-				StrikeModel.strength(ticker, kit.attackDelay(picked));
+				StrikeModel.strength(ticker - 1, kit.attackDelay(picked));
 			boolean crit = StrikeModel.isFull(strength) && !sprinting
 				&& fall > 0 && !onGround;
 			boolean mace = held.is(Items.MACE);
@@ -544,7 +551,7 @@ public final class TickSim
 			}
 			
 			int disable = (int)(Loadout.disableBlockingSeconds(held) * 20);
-			return new ServerAttack(damage, smash, launch, disable, pos);
+			return new ServerAttack(damage, crit, smash, launch, disable, pos);
 		}
 		
 		private Transition result()

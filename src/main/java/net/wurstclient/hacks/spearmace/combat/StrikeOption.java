@@ -15,7 +15,7 @@ import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
  * @param update
  *            in how many updates the attack click gets queued (0 = now)
  * @param charged
- *            whether the pre-item is fully charged, with a tick to spare
+ *            whether the pre-item is fully charged when the hit lands
  * @param strength
  *            the expected attack charge when the hit lands
  * @param fall

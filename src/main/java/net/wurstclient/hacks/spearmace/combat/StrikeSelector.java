@@ -158,19 +158,22 @@ public enum StrikeSelector
 			if(!e.inReach(stack, i)
 				|| !StrikeModel.canSmash(e.fall(i) - FALL_SAFETY))
 				continue;
-			
-			// the attack charge in this update, before this tick's increment
+				
+			// the attack charge in this update, before this tick's increment,
+			// which is also what the server sees, as its own charge is a
+			// tick behind (measured)
 			double ticker = held ? self.attackStrengthTicker() + k : k - 2;
-			boolean charged =
-				StrikeModel.isFull(StrikeModel.strength(ticker, delay));
+			double strength = StrikeModel.strength(ticker, delay);
+			boolean charged = StrikeModel.isFull(strength);
 			boolean lastChance = !e.inReach(stack, i + 1);
 			if(!charged && !lastChance)
 				continue;
-			
-			// the hit lands after this tick's increment
-			double strength = StrikeModel.strength(ticker + 1, delay);
-			boolean crit = StrikeModel.isFull(strength) && !self.sprinting()
-				&& e.fall(i) > 0;
+				
+			// in the tick that lands, the server already counts the player
+			// as on the ground but hasn't reset the fall distance yet, so
+			// the hit still smashes but isn't a crit (measured)
+			boolean crit = charged && !self.sprinting() && e.fall(i) > 0
+				&& i + 1 < e.landing();
 			double damage =
 				StrikeModel.damage(kit.attackDamage(stack), strength, e.fall(i),
 					Loadout.level(mace, Enchantments.DENSITY), crit);

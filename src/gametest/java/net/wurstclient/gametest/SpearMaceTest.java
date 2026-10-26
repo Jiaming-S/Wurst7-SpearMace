@@ -21,6 +21,8 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldBuilder;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
@@ -30,6 +32,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.golem.IronGolem;
@@ -210,6 +213,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			runCommand(server, "time set noon");
 			runCommand(server, "difficulty peaceful");
 			runCommand(server, "gamerule spawn_mobs false");
+			logServerHits();
 			context.waitTicks(2);
 			spContext.getConnection().waitForChunksRender();
 			
@@ -1824,6 +1828,38 @@ public final class SpearMaceTest implements FabricClientGameTest
 	 * Logs the server's view of thrown projectiles: ground truth for the
 	 * timing model.
 	 */
+	/**
+	 * Logs what the server sees when the player attacks and how much
+	 * damage the hit does, as the tick logs can't show the attack itself.
+	 */
+	private static void logServerHits()
+	{
+		AttackEntityCallback.EVENT
+			.register((player, level, hand, entity, hit) -> {
+				if(!level.isClientSide())
+					LOGGER.info(
+						"SM server attack t{}: feet={} vel={} fall={} onGround={} sprinting={} strength={} slot={} item={}",
+						level.getGameTime(), fmt(player.position()),
+						fmt(player.getDeltaMovement()),
+						fmt(player.fallDistance), player.onGround(),
+						player.isSprinting(),
+						fmt(player.getAttackStrengthScale(0.5F)),
+						player.getInventory().getSelectedSlot(),
+						player.getMainHandItem().getItem());
+				return InteractionResult.PASS;
+			});
+		ServerLivingEntityEvents.ALLOW_DAMAGE
+			.register((entity, source, amount) -> {
+				if(source.getEntity() instanceof ServerPlayer p)
+					LOGGER.info(
+						"SM server hurt t{}: amount={} fall={} onGround={} sprinting={} hurtTime={}",
+						p.level().getGameTime(), fmt(amount),
+						fmt(p.fallDistance), p.onGround(), p.isSprinting(),
+						entity.hurtTime);
+				return true;
+			});
+	}
+	
 	private void logServerProjectiles(String name, int tick)
 	{
 		String projectiles = server.computeOnServer(mc -> {

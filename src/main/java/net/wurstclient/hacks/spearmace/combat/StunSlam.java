@@ -148,11 +148,11 @@ public record StunSlam() implements Action
 			if(self.missTime() > 0)
 				return Step.idle(track).holding(Channel.HOTBAR);
 				
-			// the axe hit reset the charge, so this one is weak but still
-			// smashes
+			// the axe hit reset the charge, and the server's charge is a tick
+			// behind, so this one is weak but still smashes
 			Engagement e = Engagement.of(level, s);
 			ItemStack axe = kit.get(track.axeSlot());
-			double strength = StrikeModel.strength(1, kit.attackDelay(axe));
+			double strength = StrikeModel.strength(0, kit.attackDelay(axe));
 			double fall = e.fall(1);
 			double damage = StrikeModel.damage(kit.attackDamage(axe), strength,
 				fall,
