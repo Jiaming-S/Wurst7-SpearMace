@@ -68,6 +68,15 @@ loom {
 			jvmArguments.add("-Dfabric.client.gametest")
 			programArguments.add("--username=Wurst-Bot")
 		}
+		
+		// SpearMace self-play gym, see net.wurstclient.gametest.gym.SpearMaceGym
+		spearMaceGym {
+			inherit client
+			source = sourceSets.gametest
+			runDir = "build/run/spearMaceGym"
+			jvmArguments.add("-Dwurst.spearmace.gym=host")
+			programArguments.add("--username=GymHost")
+		}
 	}
 }
 

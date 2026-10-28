@@ -49,6 +49,7 @@ public final class Runner implements UpdateListener
 	private GameState previous;
 	private Execution execution = new Execution(Plan.NOTHING, 0);
 	private int replans;
+	private DecisionListener listener;
 	
 	/**
 	 * @param target
@@ -64,6 +65,15 @@ public final class Runner implements UpdateListener
 	public void setPlanner(Planner planner)
 	{
 		this.planner = planner;
+	}
+	
+	/**
+	 * Tells {@code listener} about every replan and every action that
+	 * ends, or nobody if {@code null}.
+	 */
+	public void setListener(DecisionListener listener)
+	{
+		this.listener = listener;
 	}
 	
 	public void start()
@@ -107,8 +117,13 @@ public final class Runner implements UpdateListener
 	
 	private void replan(GameState now, EnumSet<Trigger> triggers)
 	{
+		long start = System.nanoTime();
 		Plan plan = planner.replan(MC.level, now);
+		long nanos = System.nanoTime() - start;
 		replans++;
+		if(listener != null)
+			listener.onDecision(
+				new Decision(now, triggers, plan, planner.lastTrace(), nanos));
 		if(!triggers.isEmpty())
 			LOGGER.info("[{}] replanned on {}", now.self().tick(), triggers);
 		showPreview(plan, now);
@@ -138,6 +153,24 @@ public final class Runner implements UpdateListener
 	{
 		return replans;
 	}
+	
+	/** Watches the fight's decisions, such as to record them. */
+	public interface DecisionListener
+	{
+		public void onDecision(Decision decision);
+		
+		public void onActionEnd(Entry entry);
+	}
+	
+	/**
+	 * A replan.
+	 *
+	 * @param trace
+	 *            the search tree, or {@code null} unless it is being shown
+	 */
+	public record Decision(GameState now, EnumSet<Trigger> triggers, Plan plan,
+		SearchTrace trace, long nanos)
+	{}
 	
 	public enum Status
 	{
@@ -278,6 +311,8 @@ public final class Runner implements UpdateListener
 			Entry entry =
 				new Entry(name, status, reason, payload, startTick, tick);
 			history.add(entry);
+			if(listener != null)
+				listener.onActionEnd(entry);
 			committed = false;
 			LOGGER.info("[{}] {}", tick, entry);
 		}

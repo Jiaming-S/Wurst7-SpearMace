@@ -35,6 +35,7 @@ public final class Planner
 	
 	private long totalNanos;
 	private int replans;
+	private SearchTrace lastTrace;
 	
 	public Planner(TargetModel targetModel, Options options,
 		Controller controller, Search search, Evaluator evaluator,
@@ -55,6 +56,7 @@ public final class Planner
 			new ModelProblem(now, model, options, controller, evaluator);
 		SearchTrace trace =
 			Preview.isTracing() ? new SearchTrace(problem) : null;
+		lastTrace = trace;
 		if(trace != null)
 			problem = trace;
 		long start = System.nanoTime();
@@ -73,6 +75,15 @@ public final class Planner
 	public double meanMillis()
 	{
 		return replans == 0 ? 0 : totalNanos / 1e6 / replans;
+	}
+	
+	/**
+	 * The search tree of the last replan, or {@code null} unless the tree
+	 * is being shown, see {@link Preview#setTracing}.
+	 */
+	public SearchTrace lastTrace()
+	{
+		return lastTrace;
 	}
 	
 	/** Fills what the plan's actions leave unclaimed. */

@@ -202,13 +202,14 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 	{
 		double rangeSq = range.getValueSq();
 		if(stickToTarget.isChecked() && target != null && target.isAlive()
-			&& !target.isRemoved() && MC.player.distanceToSqr(target) <= rangeSq
+			&& !target.isRemoved() && !target.isSpectator()
+			&& MC.player.distanceToSqr(target) <= rangeSq
 			&& entityFilters.testOne(target))
 			return target;
 		
 		return entityFilters
 			.applyTo(EntityUtils.getMeleeAttackableEntities()
-				.filter(e -> e instanceof LivingEntity)
+				.filter(e -> e instanceof LivingEntity && !e.isSpectator())
 				.filter(e -> MC.player.distanceToSqr(e) <= rangeSq))
 			.min(priority.getSelected().comparator)
 			.map(LivingEntity.class::cast).orElse(null);

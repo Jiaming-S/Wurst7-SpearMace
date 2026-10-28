@@ -37,3 +37,6 @@ desktop.ini
 
 # SpearMace pearl catch training data
 spearmace-catchdata/
+
+# SpearMace self-play gym data
+spearmace-gym/

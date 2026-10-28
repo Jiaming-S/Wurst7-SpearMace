@@ -6,6 +6,9 @@
   "license": "GPL-3.0-or-later",
   "environment": "client",
   "entrypoints": {
+    "client": [
+      "net.wurstclient.gametest.gym.SpearMaceGym"
+    ],
     "fabric-client-gametest": [
       "net.wurstclient.gametest.WurstTest",
       "net.wurstclient.gametest.SpearMaceTest"
