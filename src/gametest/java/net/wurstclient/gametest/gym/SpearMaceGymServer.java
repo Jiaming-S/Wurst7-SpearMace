@@ -16,6 +16,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.players.NameAndId;
 
 /**
  * The server half of the SpearMace gym: the {@code /gym} command and its
@@ -27,7 +28,8 @@ import net.minecraft.server.MinecraftServer;
  * <p>
  * On a dedicated server, {@code WURST_GYM_AUTOSTART="<start options>"}
  * runs {@code /gym start} once the server is up and stops the server when
- * the gym is done.
+ * the gym is done. {@code WURST_GYM_OPS="name1,name2"} ops those (offline)
+ * players at startup.
  */
 public final class SpearMaceGymServer implements ModInitializer
 {
@@ -78,9 +80,30 @@ public final class SpearMaceGymServer implements ModInitializer
 				run.finish("world closed");
 		});
 		
+		String ops = System.getenv("WURST_GYM_OPS");
+		if(role.equals("server") && ops != null)
+			registerOps(ops);
+		
 		String autostart = System.getenv("WURST_GYM_AUTOSTART");
 		if(role.equals("server") && autostart != null)
 			registerAutostart(autostart.trim());
+	}
+	
+	/** Ops these offline names, so they can run {@code /gym}. */
+	private static void registerOps(String names)
+	{
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			for(String name : names.split("[,\\s]+"))
+			{
+				if(name.isEmpty())
+					continue;
+				NameAndId player = NameAndId.createOffline(name);
+				if(server.getPlayerList().isOp(player))
+					continue;
+				server.getPlayerList().op(player);
+				LOGGER.info("Opped {}", name);
+			}
+		});
 	}
 	
 	private static void registerAutostart(String options)
