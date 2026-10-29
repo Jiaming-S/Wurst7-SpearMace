@@ -33,6 +33,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.golem.IronGolem;
@@ -40,10 +41,12 @@ import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.WindCh
 import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.SpearMaceHack;
+import net.wurstclient.hacks.spearmace.action.Action;
 import net.wurstclient.hacks.spearmace.action.ActionRunner;
 import net.wurstclient.hacks.spearmace.action.ActionRunner.Result;
 import net.wurstclient.hacks.spearmace.action.ActionRunner.StartCondition;
@@ -58,7 +61,9 @@ import net.wurstclient.hacks.spearmace.combat.MaceStrike.Struck;
 import net.wurstclient.hacks.spearmace.combat.StrikeOption;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Kind;
 import net.wurstclient.hacks.spearmace.combat.StunSlam.Slammed;
+import net.wurstclient.hacks.spearmace.action.Step;
 import net.wurstclient.hacks.spearmace.input.KeyInput;
+import net.wurstclient.hacks.spearmace.maneuver.Cushion;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch.Caught;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
@@ -108,7 +113,8 @@ import net.wurstclient.util.Rotation;
  * {@code hard}, and the pearl catches with movement keys held only when it
  * is set to {@code keys} ({@code all} runs everything). {@code catchdata}
  * collects pearl catch training data instead, see
- * {@link CatchDataCollector}; {@code all} leaves it out.
+ * {@link CatchDataCollector}; {@code all} leaves it out. {@code cushion}
+ * checks fall damage against the model and {@link Cushion}.
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
@@ -164,11 +170,17 @@ public final class SpearMaceTest implements FabricClientGameTest
 	/** The combat target whose server-side health gets logged, or -1. */
 	private int targetId = -1;
 	private double initialHealth;
+	
+	/** Runs on the test thread after every tick of {@link #run}. */
+	private Runnable testTick = () -> {};
+	
+	/** Fall damage the server player took, before effects. */
+	private static volatile double fallTaken;
 	private double targetHealth;
 	private ShieldDummy shieldDummy;
 	
 	private static final List<String> OPT_IN_GROUPS =
-		List.of("hard", "keys", "catchdata");
+		List.of("hard", "keys", "catchdata", "cushion");
 	
 	public static boolean isEnabled()
 	{
@@ -259,6 +271,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 			
 			if(runs("keys"))
 				testCatchesHoldingKeys(context, server, failures);
+			
+			if(runs("cushion"))
+				runCushionTests(context, server, failures);
 			
 			if("catchdata".equals(System.getenv("WURST_SPEARMACE_TEST")))
 				new CatchDataCollector(context, server,
@@ -925,6 +940,183 @@ public final class SpearMaceTest implements FabricClientGameTest
 		mc.options.keyDown.setDown(keys.contains("S"));
 		mc.options.keyRight.setDown(keys.contains("D"));
 		mc.options.keySprint.setDown(keys.contains("R"));
+	}
+	
+	private void runCushionTests(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		testFallDamage(context, server, failures, "Plain fall", 15, r -> {},
+			-1);
+		testFallDamage(context, server, failures, "Cushion from 15", 15,
+			r -> r.enqueue(new Cushion()), 0);
+		testFallDamage(context, server, failures, "Cushion from 30", 30,
+			r -> r.enqueue(new Cushion()), 0);
+		testFallDamage(context, server, failures, "WindCharge landing", 0,
+			r -> r.enqueue(WindChargeJump.atFeet(false)), 0);
+		testLaunchOffPillar(context, server, failures);
+		testSmashLanding(context, server, failures);
+		testMissedCatchCushion(context, server, failures);
+	}
+	
+	/**
+	 * Runs {@code setup}'s actions from {@code height} above the ground,
+	 * then waits for the landing, and checks the fall damage against what
+	 * the model predicted on the last tick in the air.
+	 *
+	 * @param expected
+	 *            the fall damage that must be taken, or -1 for any
+	 */
+	private void testFallDamage(ClientGameTestContext context,
+		TestServerContext server, List<String> failures, String name,
+		int height, Consumer<ActionRunner> setup, double expected)
+	{
+		reset(context, server);
+		if(height > 0)
+		{
+			runCommand(server, "tp @p ~ ~" + height + " ~ 0 0");
+			context.waitFor(mc -> !mc.player.onGround());
+		}
+		checkLanding(context, name, failures, expected,
+			runLanding(context, name, setup));
+	}
+	
+	/**
+	 * A wind charge jump forward off a pillar lands below where it was
+	 * launched, so the fall below the launch counts.
+	 */
+	private void testLaunchOffPillar(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Launch off a pillar";
+		reset(context, server);
+		int top = (int)GROUND_Y + PLATFORM_HEIGHT;
+		runCommand(server,
+			"fill 0 " + (int)GROUND_Y + " 0 0 " + (top - 1) + " 0 stone");
+		runCommand(server, "tp @p 0.5 " + top + " 0.5 0 0");
+		context.waitTicks(5);
+		
+		double[] predicted = runLanding(context, name,
+			r -> r.enqueue(new WindChargeJump(0F, 90, false, true)));
+		checkLanding(context, name, failures, -1, predicted);
+		runCommand(server,
+			"fill 0 " + (int)GROUND_Y + " 0 0 " + (top - 1) + " 0 air");
+	}
+	
+	/**
+	 * A smash protects the landing after its launch, but this one lands
+	 * next to the golem right after the hit, which clears that.
+	 */
+	private void testSmashLanding(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Smash landing";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + (GROUND_Y + 20) + " "
+			+ TARGET_Z + " 0 90");
+		context.waitFor(
+			mc -> !mc.player.onGround() && clientEntity(golem) != null);
+		
+		checkLanding(context, name, failures, -1, runLanding(context, name,
+			r -> r.enqueue(new MaceStrike(PreItem.HAND))));
+	}
+	
+	/**
+	 * A pearl catch whose wind charge never reaches the pearl leaves the
+	 * player falling, so the catch throws a cushion before the landing.
+	 */
+	private void testMissedCatchCushion(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Missed catch cushion";
+		reset(context, server);
+		runCommand(server, "tp @p ~ ~20 ~ 0 0");
+		context.waitFor(mc -> !mc.player.onGround());
+		
+		// remove the catch's wind charge, so the pearl flies on
+		int[] removed = {-1};
+		boolean[] cushioned = {false};
+		testTick = () -> server.runOnServer(srv -> {
+			ServerPlayer p = getServerPlayer(srv);
+			for(Entity e : p.level().getEntities(p,
+				p.getBoundingBox().inflate(64), WindCharge.class::isInstance))
+				if(removed[0] < 0)
+				{
+					removed[0] = e.getId();
+					e.discard();
+				}else if(e.getId() != removed[0])
+					cushioned[0] = true;
+		});
+		double[] predicted = runLanding(context, name,
+			r -> r.enqueueAnyway(new PearlCatch(UP, 3, 0)));
+		testTick = () -> {};
+		
+		if(removed[0] < 0)
+			failures.add(name + ": no catch wind charge was thrown");
+		if(!cushioned[0])
+			failures.add(name + ": no cushion was thrown");
+		checkLanding(context, name, failures, 0, predicted);
+	}
+	
+	private double[] runLanding(ClientGameTestContext context, String name,
+		Consumer<ActionRunner> setup)
+	{
+		return runLanding(context, name, setup, mc -> {});
+	}
+	
+	/**
+	 * Runs the actions from {@code setup}, then waits on the ground.
+	 *
+	 * @return the fall damage the model predicted on the last tick in the
+	 *         air, and what the server took
+	 */
+	private double[] runLanding(ClientGameTestContext context, String name,
+		Consumer<ActionRunner> setup, Consumer<Minecraft> perTick)
+	{
+		fallTaken = 0;
+		double[] predicted = {Double.NaN};
+		run(context, name, 300, r -> {
+			setup.accept(r);
+			r.enqueueAnyway(new Land());
+		}, mc -> {
+			perTick.accept(mc);
+			GameState observed = runner.observed();
+			if(observed != null && !mc.player.onGround())
+				predicted[0] = Cushion.landingDamage(mc.level, observed.self());
+		});
+		context.waitFor(mc -> mc.player.onGround(), 200);
+		context.waitTicks(5);
+		return new double[]{predicted[0], fallTaken};
+	}
+	
+	private static void checkLanding(ClientGameTestContext context, String name,
+		List<String> failures, double expected, double[] landing)
+	{
+		double predicted = landing[0];
+		double actual = landing[1];
+		LOGGER.info("SM: {} fall damage predicted={} actual={}", name,
+			fmt(predicted), fmt(actual));
+		if(expected >= 0 && actual != expected)
+			failures.add(name + ": took " + fmt(actual) + " fall damage");
+		if(!(predicted == actual))
+			failures.add(name + ": took " + fmt(actual)
+				+ " fall damage, predicted " + fmt(predicted));
+	}
+	
+	/** Waits until the player is on the ground. */
+	private record Land() implements Action
+	{
+		@Override
+		public String name()
+		{
+			return "Land";
+		}
+		
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			return s.self().onGround() ? Step.done(null) : Step.idle(this);
+		}
 	}
 	
 	private void runCombatTests(ClientGameTestContext context,
@@ -1832,6 +2024,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		{
 			context.waitTick();
 			int t = tick;
+			testTick.run();
 			logServerProjectiles(name, t);
 			boolean idle = context.computeOnClient(mc -> {
 				perTick.accept(mc);
@@ -1923,6 +2116,14 @@ public final class SpearMaceTest implements FabricClientGameTest
 			});
 		ServerLivingEntityEvents.ALLOW_DAMAGE
 			.register((entity, source, amount) -> {
+				if(entity instanceof ServerPlayer p
+					&& source.is(DamageTypes.FALL))
+				{
+					fallTaken += amount;
+					LOGGER.info("SM server fall t{}: amount={} feet={}",
+						p.level().getGameTime(), fmt(amount),
+						fmt(p.position()));
+				}
 				if(source.getEntity() instanceof ServerPlayer p)
 					LOGGER.info(
 						"SM server hurt t{}: amount={} fall={} onGround={} sprinting={} hurtTime={}",

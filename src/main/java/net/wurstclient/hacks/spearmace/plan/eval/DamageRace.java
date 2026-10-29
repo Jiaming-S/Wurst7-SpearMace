@@ -16,7 +16,8 @@ import net.wurstclient.hacks.spearmace.state.Pending.Teleport;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 
 /**
- * Expected damage dealt, minus what it cost: fall damage, items and time.
+ * Expected damage dealt, minus what it cost: fall damage (also the
+ * expected fall damage of a missed pearl catch), items and time.
  * A state is worth the height the next smash can use (and loses as much
  * for being below the target), a wind charge to launch again with, and
  * being close enough to strike. A pending pearl teleport counts as already
@@ -42,7 +43,8 @@ public final class DamageRace implements Evaluator
 	@Override
 	public double score(Outcome o)
 	{
-		return o.chance() * o.damageDealt() - w.fallDamage() * o.damageTaken()
+		double taken = o.damageTaken() + (1 - o.chance()) * o.missDamage();
+		return o.chance() * o.damageDealt() - w.fallDamage() * taken
 			- w.windCharge() * o.count(Event.THREW_WIND_CHARGE)
 			- w.pearl() * o.count(Event.THREW_PEARL) - w.tick() * o.ticks();
 	}

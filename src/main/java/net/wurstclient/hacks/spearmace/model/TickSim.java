@@ -66,9 +66,13 @@ import net.wurstclient.util.Rotation;
  * </ol>
  *
  * <p>
+ * Fall damage counts the fall only down to the server's impulse impact
+ * position, which wind charge explosions and smashes set (see
+ * {@link SelfState#impactY()}).
+ *
+ * <p>
  * Not modelled: blocks in the way of the crosshair pick, armor, effects,
- * the fall damage protection of wind charge launches, and projectiles
- * hitting entities.
+ * and projectiles hitting entities.
  */
 public final class TickSim
 {
@@ -88,6 +92,15 @@ public final class TickSim
 	 * up at tick n + this.
 	 */
 	public static final int MOTION_DELAY = 2;
+	
+	/**
+	 * {@code LivingEntity.setIgnoreFallDamageFromCurrentImpulse()}: server
+	 * ticks before standing on the ground clears the impact position.
+	 */
+	public static final int IMPULSE_GRACE = 40;
+	
+	/** Fall distance that doesn't hurt ({@code SAFE_FALL_DISTANCE}). */
+	public static final double SAFE_FALL = 3;
 	
 	/** Wind charges that fly longer than this are dropped. */
 	private static final int MAX_CHARGE_AGE = 60;
@@ -145,6 +158,8 @@ public final class TickSim
 		private Vec3 vel;
 		private boolean onGround;
 		private double fall;
+		private double impactY;
+		private int impulseGrace;
 		private float yaw;
 		private float pitch;
 		private Move move;
@@ -168,6 +183,8 @@ public final class TickSim
 			vel = before.vel();
 			onGround = before.onGround();
 			fall = before.fallDistance();
+			impactY = before.impactY();
+			impulseGrace = before.impulseGrace();
 			yaw = before.yaw();
 			pitch = before.pitch();
 			move = before.move();
@@ -209,9 +226,15 @@ public final class TickSim
 				if(!onGround)
 				{
 					events.add(Event.LANDED);
-					fallDamage = Math.max(0, Math.ceil(fall - 3));
+					// Entity.checkFallDamage() only hurts after a fall
+					if(fall > 0)
+						land(sim.pos.y);
 				}
 				fall = 0;
+				
+				// ServerGamePacketListenerImpl.handlePlayerPositionChange()
+				if(impulseGrace == 0)
+					impactY = Double.NaN;
 			}
 			if(vel.y > 0 && sim.vel.y <= 0 && !sim.onGround)
 				events.add(Event.APEX);
@@ -231,6 +254,26 @@ public final class TickSim
 				target = targetModel.step(level, target);
 			
 			arrive();
+		}
+		
+		/**
+		 * {@code LivingEntity.causeFallDamage()} and
+		 * {@code calculateFallDamage()}
+		 */
+		private void land(double y)
+		{
+			double counted =
+				Double.isNaN(impactY) ? fall : Math.min(fall, impactY - y);
+			fallDamage = Math.max(0, Math.floor(counted + 1e-6 - SAFE_FALL));
+			if(counted <= 0 || fallDamage > 0)
+				impactY = Double.NaN;
+		}
+		
+		/** {@code LivingEntity.setIgnoreFallDamageFromCurrentImpulse()} */
+		private void impulseAt(double y)
+		{
+			impactY = y;
+			impulseGrace = Math.max(impulseGrace, IMPULSE_GRACE);
 		}
 		
 		/** Whether a smash launch is on its way to the player. */
@@ -279,6 +322,9 @@ public final class TickSim
 		
 		private void serverTick()
 		{
+			if(impulseGrace > 0)
+				impulseGrace--;
+			
 			serverPos = pos;
 			for(Pending p : pending)
 				if(p instanceof Teleport t && !t.applied())
@@ -359,10 +405,19 @@ public final class TickSim
 			damageDealt += damage;
 			events.add(Event.STRUCK);
 			
-			// MaceItem.postHurtEnemy() resets the server's fall distance
+			// MaceItem.postHurtEnemy() resets the server's fall distance, and
+			// hurtEnemy() keeps the lower impact position
 			if(attack.smash())
 			{
 				fall = 0;
+				impulseAt(!Double.isNaN(impactY) && impactY <= serverPos.y
+					? impactY : serverPos.y);
+				
+				// but Wind Burst's explosion isn't a wind charge's, so
+				// onExplosionHit() ends the grace time, and standing on the
+				// ground right after the smash clears the impact (measured)
+				if(!Double.isNaN(attack.launchVelY()))
+					impulseGrace = 0;
 				motion(Vec3.ZERO, attack.launchVelY());
 			}
 		}
@@ -407,6 +462,8 @@ public final class TickSim
 		private void teleport(Vec3 to)
 		{
 			fall = 0;
+			impactY = Double.NaN;
+			impulseGrace = 0;
 			serverPos = to;
 			pending.add(new Teleport(serverTick + MOTION_DELAY, to));
 		}
@@ -430,6 +487,10 @@ public final class TickSim
 				Vec3 knockback = WindBurst.knockback(level, center, serverPos);
 				if(knockback.lengthSqr() > 0)
 					motion(knockback, Double.NaN);
+				
+				// ServerPlayer.onExplosionHit()
+				if(WindBurst.reaches(center, serverPos))
+					impulseAt(serverPos.y);
 				return;
 			}
 			
@@ -556,10 +617,11 @@ public final class TickSim
 		
 		private Transition result()
 		{
-			SelfState self = new SelfState(tick, pos, vel, onGround, fall, yaw,
-				pitch, move, sprinting, jump, before.fallFlying(), ticker,
-				heldChanged, missTime, before.interactionRange(),
-				before.knockbackResistance(), kit, pending);
+			SelfState self = new SelfState(tick, pos, vel, onGround, fall,
+				impactY, impulseGrace, yaw, pitch, move, sprinting, jump,
+				before.fallFlying(), ticker, heldChanged, missTime,
+				before.interactionRange(), before.knockbackResistance(), kit,
+				pending);
 			return new Transition(new GameState(self, target), events,
 				damageDealt, fallDamage);
 		}

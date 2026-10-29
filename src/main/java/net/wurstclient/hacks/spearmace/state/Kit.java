@@ -201,6 +201,12 @@ public final class Kit
 		return readySlot(s -> s.is(Items.WIND_CHARGE));
 	}
 	
+	/** Whether the hotbar holds wind charges, ready or not. */
+	public boolean hasWindCharge()
+	{
+		return slots.stream().anyMatch(s -> s.is(Items.WIND_CHARGE));
+	}
+	
 	/** @return a hotbar slot holding ender pearls that are ready, or -1 */
 	public int enderPearl()
 	{

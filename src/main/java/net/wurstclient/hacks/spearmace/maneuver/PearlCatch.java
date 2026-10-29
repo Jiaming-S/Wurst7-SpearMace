@@ -25,6 +25,7 @@ import net.wurstclient.hacks.spearmace.sim.PlayerSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
+import net.wurstclient.hacks.spearmace.state.Pending.Teleport;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 import net.wurstclient.util.Rotation;
 
@@ -176,7 +177,7 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 		
 		Flying flying = new Flying(name(), d, now, kit.windCharge(),
 			kit.selected(), plan, nominal, expected.pSuccess(), -1,
-			Set.copyOf(oldPearls), null, now, self);
+			Set.copyOf(oldPearls), null, now, self, -1);
 		TickInput click = TickInput.NONE.withRotation(pearlAim)
 			.withSlot(kit.enderPearl()).withUse();
 		return Step.run(click, flying).asCommitted();
@@ -294,11 +295,13 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 	 * @param pearlTick
 	 *            the pearl click at first, then when {@code pearl} was last
 	 *            in the state
+	 * @param cushionTick
+	 *            when a {@link Cushion} throw was clicked, or -1
 	 */
 	private record Flying(String name, int delay, int clickTick, int chargeSlot,
 		int prevSlot, Plan plan, PearlInfo info, double chance, int chargeTick,
 		Set<Integer> oldPearls, PearlInFlight pearl, int pearlTick,
-		SelfState last) implements Action, InFlight
+		SelfState last, int cushionTick) implements Action, InFlight
 	{
 		@Override
 		public Step next(Level level, GameState s)
@@ -341,20 +344,27 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 			
 			TickInput input = TickInput.NONE;
 			int chargeTick = this.chargeTick;
+			int cushionTick = this.cushionTick;
 			if(throwNow)
 			{
 				input = TickInput.NONE.withRotation(plan.aim())
 					.withSlot(chargeSlot).withUse();
 				chargeTick = tick;
+			}else if(chargeTick >= 0 && cushionTick < 0
+				&& cushionNow(level, self))
+			{
+				input = Cushion.throwInput(self, self.kit().windCharge());
+				cushionTick = tick;
 			}else if(chargeTick >= 0 && tick == chargeTick + 1
-				&& prevSlot != chargeSlot)
+				&& prevSlot != chargeSlot
+				|| cushionTick >= 0 && tick == cushionTick + 1)
 				input = TickInput.NONE.withSlot(prevSlot);
 			
 			Flying then =
 				new Flying(name, delay, clickTick, chargeSlot, prevSlot, plan,
 					info, plan == this.plan ? chance : plan.pSuccess(),
 					chargeTick, oldPearls, seen != null ? seen : pearl,
-					seen != null ? tick : pearlTick, self);
+					seen != null ? tick : pearlTick, self, cushionTick);
 			// nothing else can be done until the pearl lands or is caught
 			return Step.run(input, then).asCommitted();
 		}
@@ -378,6 +388,22 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 					"the pearl missed and landed at " + Prediction.fmt(to));
 			
 			return Step.done(new Caught(to, delay, plan));
+		}
+		
+		/**
+		 * Whether the landing would hurt if the pearl misses, and a wind
+		 * charge has to be thrown now to cushion it.
+		 */
+		private static boolean cushionNow(Level level, SelfState self)
+		{
+			if(self.kit().windCharge() < 0
+				|| !self.pending(Teleport.class).isEmpty())
+				return false;
+			
+			SelfState miss = self.withoutPearls();
+			Cushion.Landing landing = Cushion.landing(level, miss);
+			return landing != null && landing.fallDamage() > 0
+				&& Cushion.throwNow(level, miss);
 		}
 		
 		private PearlInFlight findPearl(SelfState self)

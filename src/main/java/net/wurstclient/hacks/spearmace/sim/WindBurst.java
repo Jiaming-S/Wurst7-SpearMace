@@ -27,6 +27,20 @@ public enum WindBurst
 	public static final float KNOCKBACK_MULTIPLIER = 1.22F;
 	
 	/**
+	 * Whether the explosion hits a player at {@code feet}, even one that it
+	 * can't push because nothing of them is exposed to it.
+	 */
+	public static boolean reaches(Vec3 center, Vec3 feet)
+	{
+		return distance(center, feet) <= 1;
+	}
+	
+	private static double distance(Vec3 center, Vec3 feet)
+	{
+		return Math.sqrt(feet.distanceToSqr(center)) / (RADIUS * 2.0F);
+	}
+	
+	/**
 	 * @param feet
 	 *            the player's position, as the server knows it when the
 	 *            charge explodes
@@ -35,10 +49,11 @@ public enum WindBurst
 	 */
 	public static Vec3 knockback(Level level, Vec3 center, Vec3 feet)
 	{
-		// distance is measured to the feet, direction to the eyes
-		double dist = Math.sqrt(feet.distanceToSqr(center)) / (RADIUS * 2.0F);
-		if(dist > 1)
+		if(!reaches(center, feet))
 			return Vec3.ZERO;
+		
+		// distance is measured to the feet, direction to the eyes
+		double dist = distance(center, feet);
 		
 		Vec3 eyes = feet.add(0, PlayerSim.EYE_HEIGHT, 0);
 		Vec3 direction = eyes.subtract(center).normalize();

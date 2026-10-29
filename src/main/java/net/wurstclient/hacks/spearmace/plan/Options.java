@@ -20,6 +20,7 @@ import net.wurstclient.hacks.spearmace.combat.MaceStrike;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector;
 import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Decision;
 import net.wurstclient.hacks.spearmace.combat.StunSlam;
+import net.wurstclient.hacks.spearmace.maneuver.Cushion;
 import net.wurstclient.hacks.spearmace.maneuver.Drift;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
@@ -46,6 +47,7 @@ import net.wurstclient.util.Rotation;
  * <li>falling near the target: {@link StrikeSelector}'s pick, then the
  * other strikes, then a pearl catch straight up if the fall is still
  * short</li>
+ * <li>falling anywhere: a {@link Cushion} if the landing would hurt</li>
  * </ul>
  * Every list ends with a {@link Hold}, which always works.
  */
@@ -135,6 +137,8 @@ public final class Options
 				if(height(s) < LOW)
 					addVerticalCatch(s, actions);
 			}
+			addIfNew(actions, new Cushion(), self.kit().hasWindCharge()
+				&& Cushion.landingDamage(level, self) > 0);
 			actions.add(new Drift(HOLD));
 			actions.add(new Hold("falling", HOLD));
 		}

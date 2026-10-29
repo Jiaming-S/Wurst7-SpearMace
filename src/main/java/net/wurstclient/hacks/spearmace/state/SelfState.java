@@ -32,6 +32,14 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
  *
  * @param tick
  *            the player's {@code tickCount}
+ * @param impactY
+ *            the height of the server's {@code currentImpulseImpactPos},
+ *            which caps the fall that counts for fall damage, or NaN if
+ *            there is none. Only the server knows it, so it comes from
+ *            the prediction.
+ * @param impulseGrace
+ *            the server's {@code currentImpulseContextResetGraceTime},
+ *            ticks until standing on the ground clears {@code impactY}
  * @param move
  *            the movement keys held, see {@link PlayerSim}
  * @param jump
@@ -47,10 +55,11 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
  *            the {@code EXPLOSION_KNOCKBACK_RESISTANCE} attribute
  */
 public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
-	double fallDistance, float yaw, float pitch, Move move, boolean sprinting,
-	boolean jump, boolean fallFlying, int attackStrengthTicker,
-	boolean heldChanged, int missTime, double interactionRange,
-	double knockbackResistance, Kit kit, List<Pending> pending)
+	double fallDistance, double impactY, int impulseGrace, float yaw,
+	float pitch, Move move, boolean sprinting, boolean jump, boolean fallFlying,
+	int attackStrengthTicker, boolean heldChanged, int missTime,
+	double interactionRange, double knockbackResistance, Kit kit,
+	List<Pending> pending)
 {
 	private static final Minecraft MC = WurstClient.MC;
 	
@@ -63,8 +72,8 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 	{
 		return new SelfState(MC.player.tickCount, MC.player.position(),
 			MC.player.getDeltaMovement(), MC.player.onGround(),
-			MC.player.fallDistance, MC.player.getYRot(), MC.player.getXRot(),
-			Move.ofHeldKeys(), MC.player.isSprinting(),
+			MC.player.fallDistance, Double.NaN, 0, MC.player.getYRot(),
+			MC.player.getXRot(), Move.ofHeldKeys(), MC.player.isSprinting(),
 			MC.options.keyJump.isDown(), MC.player.isFallFlying(),
 			MC.player.attackStrengthTicker,
 			!ItemStack.isSameItem(MC.player.lastItemInMainHand,
@@ -134,6 +143,17 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 	public AABB box()
 	{
 		return PlayerSim.box(pos);
+	}
+	
+	/** This state as if the pearls in the air weren't there. */
+	public SelfState withoutPearls()
+	{
+		ArrayList<Pending> rest = new ArrayList<>(pending);
+		rest.removeIf(PearlInFlight.class::isInstance);
+		return new SelfState(tick, pos, vel, onGround, fallDistance, impactY,
+			impulseGrace, yaw, pitch, move, sprinting, jump, fallFlying,
+			attackStrengthTicker, heldChanged, missTime, interactionRange,
+			knockbackResistance, kit, rest);
 	}
 	
 	public <T extends Pending> List<T> pending(Class<T> type)

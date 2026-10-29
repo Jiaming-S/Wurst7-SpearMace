@@ -122,6 +122,15 @@ public final class ActionRunner implements UpdateListener
 		return current;
 	}
 	
+	/**
+	 * The state seen at the latest update, with what only the model knows,
+	 * or {@code null} before the first one.
+	 */
+	public GameState observed()
+	{
+		return observed;
+	}
+	
 	public List<Result> results()
 	{
 		return List.copyOf(results);

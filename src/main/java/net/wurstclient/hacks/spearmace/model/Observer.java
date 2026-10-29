@@ -77,11 +77,13 @@ public enum Observer
 		// keeps counting
 		double fall = Math.min(c.fallDistance(), p.fallDistance());
 		
+		// the impulse context that limits fall damage is server-only
 		SelfState self = new SelfState(c.tick(), c.pos(), c.vel(), c.onGround(),
-			fall, c.yaw(), c.pitch(), c.move(), c.sprinting(), c.jump(),
-			c.fallFlying(), c.attackStrengthTicker(), c.heldChanged(),
-			c.missTime(), c.interactionRange(), c.knockbackResistance(),
-			c.kit().withCooldownsFrom(p.kit()), pending);
+			fall, p.impactY(), p.impulseGrace(), c.yaw(), c.pitch(), c.move(),
+			c.sprinting(), c.jump(), c.fallFlying(), c.attackStrengthTicker(),
+			c.heldChanged(), c.missTime(), c.interactionRange(),
+			c.knockbackResistance(), c.kit().withCooldownsFrom(p.kit()),
+			pending);
 		TargetState target = captured.target() == null ? null
 			: captured.target().withTimersFrom(predicted.target());
 		return new GameState(self, target);
