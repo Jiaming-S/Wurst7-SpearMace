@@ -8,33 +8,36 @@
 package net.wurstclient.gametest.gym;
 
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.server.MinecraftServer.MultiplayerScope;
 
 /**
  * A gym where SpearMace fights itself, to collect data for learned
- * policies. Two bot clients fight in an arena of the host's world, with
- * planner configs sampled per episode, while anyone else watches.
+ * policies. Bot clients fight in pairs in arenas of the host's world, with
+ * planner configs sampled per episode, while anyone else watches. This is
+ * the client half: the bots, and opening a singleplayer world to them. See
+ * {@link SpearMaceGymServer} for the referee.
  *
- * <pre>
- * ./gradlew runSpearMaceGym
- * </pre>
- *
- * Then, in any singleplayer world:
+ * <p>
+ * On a desktop, {@code ./gradlew runSpearMaceGym}, then in any
+ * singleplayer world (headless: {@code ./gradlew runSpearMaceGymServer},
+ * see {@code scripts/spearmace/gym-headless.sh}):
  * <ul>
  * <li>{@code /gym arena <from> <to>}: the box the fight must stay in
  * <li>{@code /gym spawn add [pos]}, {@code /gym spawn clear}: start points;
  * with fewer than two, starts are sampled on the arena's floor
  * <li>{@code /gym kit}, {@code /gym kit default}: hand out your inventory
  * instead of the SpearMaceTest kit
- * <li>{@code /gym start [episodes] [a=<cfg>] [b=<cfg>] [mirror] [self]
- * [noagents] [seed=N] [hours=H] [ticks=N] [health=N]}: opens the world to LAN
- * and
- * starts two bot clients, Gym-A and Gym-B (with {@code self}, you are A).
- * Configs are {@code rules}, {@code beam:WxD}, {@code mcts:N} or
- * {@code random} (default).
+ * <li>{@code /gym start [episodes] [act=<cfg>] [a=<cfg>] [b=<cfg>]
+ * [expert=<cfg>] [explore=P] [tps=N] [pairs=N] [mirror] [self] [noagents]
+ * [seed=N] [hours=H] [ticks=N] [health=N]}: starts a bot client per player
+ * (Gym-A and Gym-B, or Gym-0A, Gym-0B, ... with {@code pairs}; with
+ * {@code self}, you are the first A). Configs are {@code rules},
+ * {@code beam:WxD}, {@code mcts:N}, {@code random} (default) or
+ * {@code expert}. With {@code expert}, every decision is also labeled by
+ * that much slower search; {@code tps} slows the game down to give it
+ * time.
  * <li>{@code /gym stop}, {@code /gym status}
  * </ul>
  *
@@ -44,7 +47,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
  * <p>
  * Data goes to {@code spearmace-gym/<time>/} in the project (or
  * {@code WURST_GYM_DIR}): {@code episodes.jsonl} from the referee and
- * {@code decisions-A.jsonl}/{@code decisions-B.jsonl} from the bots.
+ * {@code decisions-<side>.jsonl} from each bot.
  *
  * <p>
  * Does nothing unless started with {@code -Dwurst.spearmace.gym=host} or
@@ -61,48 +64,34 @@ public final class SpearMaceGym implements ClientModInitializer
 		if(role == null)
 			return;
 		
-		int port = Integer.getInteger("wurst.spearmace.gym.port", DEFAULT_PORT);
-		GymPayloads.register();
 		GymAgent agent = new GymAgent();
 		agent.register();
 		
 		switch(role)
 		{
-			case "host" -> registerHost(port);
-			case "agent" -> agent.connectTo(port);
+			case "host" -> registerHost();
+			case "agent" -> agent.connectTo(
+				System.getProperty("wurst.spearmace.gym.host",
+					"localhost:" + DEFAULT_PORT),
+				Boolean.getBoolean("wurst.spearmace.gym.headless"));
 			default -> throw new IllegalArgumentException(
-				"wurst.spearmace.gym must be host or agent, not " + role);
+				"wurst.spearmace.gym must be host or agent here, not " + role);
 		}
 	}
 	
-	private static void registerHost(int port)
+	private static void registerHost()
 	{
-		GymCommand command = new GymCommand(port);
-		GymAutostart.registerIfRequested(() -> command.referee() != null);
-		CommandRegistrationCallback.EVENT.register((dispatcher, registries,
-			selection) -> command.register(dispatcher));
-		
-		ServerTickEvents.END_SERVER_TICK.register(server -> {
-			GymReferee r = command.referee();
-			if(r != null && r.server() == server)
-				r.tick();
+		int port = Integer.getInteger("wurst.spearmace.gym.port", DEFAULT_PORT);
+		SpearMaceGymServer.setHost(server -> {
+			if(!(server instanceof IntegratedServer integrated)
+				|| integrated.isPublished())
+				return server.getPort();
+			
+			Minecraft.getInstance().execute(() -> integrated
+				.publishServer(MultiplayerScope.LAN, false, port));
+			return port;
 		});
-		ServerLivingEntityEvents.ALLOW_DEATH
-			.register((entity, source, amount) -> {
-				GymReferee r = command.referee();
-				return r == null || r.allowDeath(entity, source);
-			});
-		ServerLivingEntityEvents.AFTER_DAMAGE
-			.register((entity, source, baseDamage, damageTaken, blocked) -> {
-				GymReferee r = command.referee();
-				if(r != null)
-					r.afterDamage(entity, source, baseDamage, damageTaken,
-						blocked);
-			});
-		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-			GymReferee r = command.referee();
-			if(r != null && r.server() == server)
-				r.finish("world closed");
-		});
+		GymAutostart.registerIfRequested(
+			() -> SpearMaceGymServer.command().run() != null);
 	}
 }

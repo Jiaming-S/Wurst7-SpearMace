@@ -29,6 +29,12 @@ public final class SearchTrace implements SearchProblem
 		new IdentityHashMap<>();
 	private final IdentityHashMap<Outcome, String> notes =
 		new IdentityHashMap<>();
+	private final IdentityHashMap<Outcome, Visits> visits =
+		new IdentityHashMap<>();
+	
+	/** See {@link SearchProblem#visited}. */
+	public record Visits(int visits, double mean)
+	{}
 	
 	/**
 	 * One action played by the search.
@@ -111,10 +117,25 @@ public final class SearchTrace implements SearchProblem
 		notes.merge(o, note, (a, b) -> a + ", " + b);
 	}
 	
+	@Override
+	public void visited(Outcome o, int n, double mean)
+	{
+		visits.put(o, new Visits(n, mean));
+	}
+	
 	/** Every played action, in the order the search played them. */
 	public List<Edge> edges()
 	{
 		return List.copyOf(edges);
+	}
+	
+	/**
+	 * How often the search went through {@code o}, or {@code null} if it
+	 * doesn't count visits.
+	 */
+	public Visits visitsOf(Outcome o)
+	{
+		return visits.get(o);
 	}
 	
 	/** What the search noted about {@code o}, or {@code null}. */

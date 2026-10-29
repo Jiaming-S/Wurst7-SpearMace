@@ -134,6 +134,7 @@ public final class Mcts implements Search
 		for(Node c : node.children)
 		{
 			p.note(c.via, String.format("n=%d mean=%.1f", c.visits, c.mean()));
+			p.visited(c.via, c.visits, c.mean());
 			noteVisits(p, c);
 		}
 	}

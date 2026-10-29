@@ -25,12 +25,21 @@ public enum GymPayloads
 	 * @param side
 	 *            {@code A} or {@code B}, which names the bot's data file
 	 * @param config
-	 *            a {@link GymConfig} as JSON
+	 *            the acting {@link GymConfig} as JSON
+	 * @param expert
+	 *            the expert's {@link GymConfig} as JSON, the same as
+	 *            {@code config} if the bot acts as the expert, or empty for
+	 *            none
+	 * @param explore
+	 *            how often to play a random action instead of the plan
+	 * @param seed
+	 *            for exploration
 	 * @param outDir
 	 *            where to write the data, on this same machine
 	 */
 	public record Start(int episode, String side, String opponent,
-		String config, String outDir) implements CustomPacketPayload
+		String config, String expert, double explore, long seed, String outDir)
+		implements CustomPacketPayload
 	{
 		public static final Type<Start> TYPE = new Type<>(id("gym_start"));
 		public static final StreamCodec<RegistryFriendlyByteBuf, Start> CODEC =
@@ -38,6 +47,8 @@ public enum GymPayloads
 				ByteBufCodecs.STRING_UTF8, Start::side,
 				ByteBufCodecs.STRING_UTF8, Start::opponent,
 				ByteBufCodecs.STRING_UTF8, Start::config,
+				ByteBufCodecs.STRING_UTF8, Start::expert, ByteBufCodecs.DOUBLE,
+				Start::explore, ByteBufCodecs.VAR_LONG, Start::seed,
 				ByteBufCodecs.STRING_UTF8, Start::outDir, Start::new);
 		
 		@Override

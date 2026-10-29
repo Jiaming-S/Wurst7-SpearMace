@@ -216,7 +216,7 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 	}
 	
 	/** The settings that shape the planner. */
-	private record Config(SearchKind search, int width, int depth,
+	public record Config(SearchKind search, int width, int depth,
 		int iterations, int budget, Weights weights)
 	{}
 	
@@ -232,7 +232,11 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 			weights);
 	}
 	
-	private static Planner planner(Config c)
+	/**
+	 * A planner like SpearMace's, but with {@code c} instead of the
+	 * settings, such as for a much slower expert search.
+	 */
+	public static Planner planner(Config c)
 	{
 		Search search = switch(c.search())
 		{
@@ -266,7 +270,7 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 		return runner;
 	}
 	
-	private enum SearchKind
+	public enum SearchKind
 	{
 		RULES("Rules"),
 		BEAM("Beam search"),

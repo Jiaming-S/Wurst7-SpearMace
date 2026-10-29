@@ -11,6 +11,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.RecordComponent;
 import java.util.Collection;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -22,7 +24,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
-import net.wurstclient.hacks.spearmace.state.Kit;
 
 /**
  * Turns the planner's records into JSON by their components, so that new
@@ -34,8 +35,26 @@ public enum GymJson
 {
 	;
 	
+	private static final Map<Class<?>, Function<Object, JsonElement>> CUSTOM =
+		new ConcurrentHashMap<>();
+	
+	/**
+	 * Writes values of exactly {@code type} with {@code writer}, for classes
+	 * that only the client has, such as Wurst's.
+	 */
+	public static <T> void register(Class<T> type,
+		Function<? super T, JsonElement> writer)
+	{
+		CUSTOM.put(type, value -> writer.apply(type.cast(value)));
+	}
+	
 	public static JsonElement of(Object value)
 	{
+		Function<Object, JsonElement> custom =
+			value == null ? null : CUSTOM.get(value.getClass());
+		if(custom != null)
+			return custom.apply(value);
+		
 		return switch(value)
 		{
 			case null -> JsonNull.INSTANCE;
@@ -47,7 +66,6 @@ public enum GymJson
 			case Vec3 v -> vec(v);
 			case ItemStack stack -> new JsonPrimitive(item(stack));
 			case Entity entity -> new JsonPrimitive(entity.getId());
-			case Kit kit -> kit(kit);
 			case Record r -> record(r);
 			case Collection<?> c -> array(c);
 			case Map<?, ?> m -> map(m);
@@ -72,29 +90,12 @@ public enum GymJson
 		return array;
 	}
 	
-	private static String item(ItemStack stack)
+	public static String item(ItemStack stack)
 	{
 		if(stack.isEmpty())
 			return "empty";
 		return BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath() + " x"
 			+ stack.getCount();
-	}
-	
-	private static JsonObject kit(Kit kit)
-	{
-		JsonObject json = new JsonObject();
-		json.addProperty("selected", kit.selected());
-		JsonArray slots = new JsonArray();
-		JsonArray cooldowns = new JsonArray();
-		for(int slot = 0; slot < 9; slot++)
-		{
-			ItemStack stack = kit.get(slot);
-			slots.add(item(stack));
-			cooldowns.add(stack.isEmpty() ? 0 : kit.cooldown(stack));
-		}
-		json.add("slots", slots);
-		json.add("cooldowns", cooldowns);
-		return json;
 	}
 	
 	private static JsonObject record(Record r)

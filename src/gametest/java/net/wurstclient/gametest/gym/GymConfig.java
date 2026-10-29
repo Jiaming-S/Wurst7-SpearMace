@@ -7,20 +7,14 @@
  */
 package net.wurstclient.gametest.gym;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Random;
 
 import com.google.gson.Gson;
 
-import net.wurstclient.hacks.SpearMaceHack;
-import net.wurstclient.hacks.spearmace.plan.eval.Weights;
-import net.wurstclient.settings.EnumSetting;
-import net.wurstclient.settings.Setting;
-import net.wurstclient.settings.SliderSetting;
-
 /**
- * How one side's SpearMace plans, as the values of its settings.
+ * How one side's SpearMace plans: its search, the sizes of that search and
+ * the evaluator's weights. Used on the server too, where Wurst isn't
+ * loaded, so it only names Wurst's settings and doesn't touch them.
  *
  * @param search
  *            the "Search" setting's name for it: {@code Rules},
@@ -32,13 +26,15 @@ public record GymConfig(String search, int width, int depth, int iterations,
 {
 	private static final Gson GSON = new Gson();
 	
-	/** Real time, so the client must keep up with 20 ticks a second. */
-	private static final int BUDGET = 50;
+	/**
+	 * At 20 ticks a second. The referee scales it to the tick rate it
+	 * runs at.
+	 */
+	public static final int BUDGET = 50;
 	
-	public static final GymConfig DEFAULT = new GymConfig("Beam search", 4, 3,
-		60, BUDGET, Weights.DEFAULT.fallDamage(), Weights.DEFAULT.windCharge(),
-		Weights.DEFAULT.pearl(), Weights.DEFAULT.height(),
-		Weights.DEFAULT.distance());
+	/** SpearMace's defaults, with the weights of {@code Weights.DEFAULT}. */
+	public static final GymConfig DEFAULT =
+		new GymConfig("Beam search", 4, 3, 60, BUDGET, 2, 1, 3, 1, 1);
 	
 	/**
 	 * A config from {@code spec}: {@code rules}, {@code beam:WxD},
@@ -100,66 +96,11 @@ public record GymConfig(String search, int width, int depth, int iterations,
 			fallDamage, windCharge, pearl, height, distance);
 	}
 	
-	/**
-	 * Sets SpearMace's settings to this config.
-	 *
-	 * @return the previous values, for {@link #restore}
-	 */
-	public Map<String, Object> apply(SpearMaceHack hack)
+	/** The same config with another time budget. */
+	public GymConfig withBudget(int newBudget)
 	{
-		Map<String, Setting> settings = hack.getSettings();
-		HashMap<String, Object> old = new HashMap<>();
-		settings.forEach((key, s) -> {
-			if(s instanceof SliderSetting slider)
-				old.put(key, slider.getValue());
-			else if(s instanceof EnumSetting<?> e)
-				old.put(key, e.getSelected().toString());
-		});
-		
-		select(settings, "search", search);
-		slide(settings, "beam width", width);
-		slide(settings, "lookahead", depth);
-		slide(settings, "mcts iterations", iterations);
-		slide(settings, "time budget", budget);
-		slide(settings, "fall damage weight", fallDamage);
-		slide(settings, "wind charge cost", windCharge);
-		slide(settings, "pearl cost", pearl);
-		slide(settings, "height value", height);
-		slide(settings, "distance penalty", distance);
-		// pearl catches easily carry the bots past the default range
-		Setting range = settings.get("range");
-		if(range instanceof SliderSetting slider)
-			slider.setValue(slider.getMaximum());
-		return old;
-	}
-	
-	/** Puts back the settings that {@link #apply} changed. */
-	public static void restore(SpearMaceHack hack, Map<String, Object> old)
-	{
-		Map<String, Setting> settings = hack.getSettings();
-		old.forEach((key, value) -> {
-			if(value instanceof Double d)
-				slide(settings, key, d);
-			else
-				select(settings, key, (String)value);
-		});
-	}
-	
-	private static void select(Map<String, Setting> settings, String key,
-		String value)
-	{
-		if(!(settings.get(key) instanceof EnumSetting<?> e)
-			|| !e.setSelected(value))
-			throw new IllegalStateException(
-				"SpearMace has no " + key + " " + value);
-	}
-	
-	private static void slide(Map<String, Setting> settings, String key,
-		double value)
-	{
-		if(!(settings.get(key) instanceof SliderSetting slider))
-			throw new IllegalStateException("SpearMace has no " + key);
-		slider.setValue(value);
+		return new GymConfig(search, width, depth, iterations, newBudget,
+			fallDamage, windCharge, pearl, height, distance);
 	}
 	
 	public String toJson()

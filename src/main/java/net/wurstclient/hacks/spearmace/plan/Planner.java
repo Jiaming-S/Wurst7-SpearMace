@@ -49,6 +49,21 @@ public final class Planner
 		this.budgetMillis = budgetMillis;
 	}
 	
+	/**
+	 * The same planner with {@code search} instead, such as one that wraps
+	 * {@link #search()}. Replan statistics start over.
+	 */
+	public Planner withSearch(Search search)
+	{
+		return new Planner(targetModel, options, controller, search, evaluator,
+			budgetMillis);
+	}
+	
+	public Search search()
+	{
+		return search;
+	}
+	
 	public Plan replan(Level level, GameState now)
 	{
 		TickSim model = new TickSim(level, targetModel);

@@ -77,6 +77,15 @@ loom {
 			jvmArguments.add("-Dwurst.spearmace.gym=host")
 			programArguments.add("--username=GymHost")
 		}
+		
+		// the same gym on a dedicated server, e.g. without a display
+		spearMaceGymServer {
+			inherit server
+			source = sourceSets.gametest
+			runDir = "build/run/spearMaceGymServer"
+			jvmArguments.add("-Dwurst.spearmace.gym=server")
+			programArguments.add("nogui")
+		}
 	}
 }
 
@@ -151,6 +160,40 @@ def prepareClientGameTestWithMods = tasks.register("prepareClientGameTestWithMod
 tasks.named("runClientGameTestWithMods") {
 	onlyIf { hasCompatMods.get() }
 	dependsOn prepareClientGameTestWithMods
+}
+
+// The dedicated gym server starts its bots with the gym client's launch,
+// which it can't copy from its own.
+def writeGymAgentLaunch = tasks.register("writeGymAgentLaunch") {
+	def client = tasks.named("runSpearMaceGym", JavaExec).get()
+	def java = client.javaLauncher.get().executablePath.asFile.absolutePath
+	def jvmArgs = client.allJvmArgs.findAll {
+		!it.startsWith("@") && !it.startsWith("-Dwurst.spearmace.gym")
+	}
+	def mainClass = client.mainClass.get()
+	def args = client.args
+	def classpath = client.classpath
+	def launchFile = layout.buildDirectory
+		.file("run/spearMaceGymServer/gym-agent-launch.json")
+	inputs.files(classpath)
+	inputs.property("jvmArgs", jvmArgs)
+	outputs.file(launchFile)
+	doLast {
+		def json = groovy.json.JsonOutput.toJson([java: java,
+			jvmArgs: jvmArgs, classpath: classpath.files*.absolutePath
+				.join(File.pathSeparator), mainClass: mainClass, args: args])
+		launchFile.get().asFile.text = groovy.json.JsonOutput.prettyPrint(json)
+	}
+}
+
+def prepareSpearMaceGymServer =
+	tasks.register("prepareSpearMaceGymServer", Copy) {
+	from "src/gametest/gym-server"
+	into layout.buildDirectory.dir("run/spearMaceGymServer")
+}
+
+tasks.named("runSpearMaceGymServer") {
+	dependsOn writeGymAgentLaunch, prepareSpearMaceGymServer
 }
 
 processResources {

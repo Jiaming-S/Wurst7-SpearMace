@@ -42,4 +42,12 @@ public interface SearchProblem
 	 */
 	public default void note(Outcome o, String note)
 	{}
+	
+	/**
+	 * How often a visit-counting search like MCTS went through {@code o}
+	 * and how good that was on average, for {@link SearchTrace}. Does
+	 * nothing unless the search tree is being recorded.
+	 */
+	public default void visited(Outcome o, int visits, double mean)
+	{}
 }

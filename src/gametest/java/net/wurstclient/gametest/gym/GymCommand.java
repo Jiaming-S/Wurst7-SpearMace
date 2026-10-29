@@ -22,8 +22,6 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
@@ -31,7 +29,8 @@ import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.MinecraftServer.MultiplayerScope;
+import net.minecraft.server.players.NameAndId;
+import net.minecraft.server.players.UserWhiteListEntry;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -42,22 +41,42 @@ import net.minecraft.world.phys.Vec3;
 public final class GymCommand
 {
 	private static final String USAGE = "/gym start [episodes]"
-		+ " [a=<cfg>] [b=<cfg>] [mirror] [self] [noagents] [seed=N]"
-		+ " [hours=H] [ticks=N] [health=N]; cfg: rules, beam:WxD, mcts:N, random";
+		+ " [act=<cfg>] [a=<cfg>] [b=<cfg>] [expert=<cfg>] [explore=P]"
+		+ " [tps=N] [pairs=N] [mirror] [self] [noagents] [seed=N] [hours=H]"
+		+ " [ticks=N] [health=N]; cfg: rules, beam:WxD, mcts:N, random,"
+		+ " expert";
 	
-	private final int port;
-	private GymArena arena;
-	private GymReferee referee;
+	/**
+	 * The expert stops when its search is done, not at a time limit, so
+	 * this only guards against a search that never ends.
+	 */
+	private static final int EXPERT_BUDGET = 120_000;
 	
-	public GymCommand(int port)
+	/** Gets the server ready for bots to join and says on which port. */
+	@FunctionalInterface
+	public interface Host
 	{
-		this.port = port;
+		public int prepare(MinecraftServer server);
 	}
 	
-	/** The running referee, or {@code null}. */
-	public GymReferee referee()
+	private final Host host;
+	private GymArena arena;
+	private GymRun run;
+	
+	/**
+	 * @param host
+	 *            for a dedicated server, just its port; a singleplayer
+	 *            world has to be opened to LAN first
+	 */
+	public GymCommand(Host host)
 	{
-		return referee != null && referee.isRunning() ? referee : null;
+		this.host = host;
+	}
+	
+	/** The running gym, or {@code null}. */
+	public GymRun run()
+	{
+		return run != null && run.isRunning() ? run : null;
 	}
 	
 	public void register(CommandDispatcher<CommandSourceStack> dispatcher)
@@ -144,15 +163,10 @@ public final class GymCommand
 		throws CommandSyntaxException
 	{
 		CommandSourceStack source = c.getSource();
-		if(referee() != null)
+		MinecraftServer server = source.getServer();
+		if(run() != null)
 		{
 			source.sendFailure(Component.literal("The gym is already running"));
-			return 0;
-		}
-		if(!(source.getServer() instanceof IntegratedServer server))
-		{
-			source.sendFailure(
-				Component.literal("The gym runs in a singleplayer world"));
 			return 0;
 		}
 		
@@ -171,24 +185,38 @@ public final class GymCommand
 			}
 		}
 		
-		long seed;
-		GymReferee.Settings settings;
+		GymRun.Settings settings;
 		try
 		{
-			seed = Long.parseLong(opts.getOrDefault("seed",
+			long seed = Long.parseLong(opts.getOrDefault("seed",
 				Long.toString(System.currentTimeMillis())));
 			double hours = Double.parseDouble(opts.getOrDefault("hours", "0"));
-			String specA = opts.getOrDefault("a", "random");
-			String specB = opts.getOrDefault("b", "random");
+			String act = opts.getOrDefault("act", "random");
+			String specA = opts.getOrDefault("a", act);
+			String specB = opts.getOrDefault("b", act);
+			GymConfig expert = opts.containsKey("expert")
+				? GymConfig.parse(opts.get("expert"), new Random(seed))
+					.withBudget(EXPERT_BUDGET)
+				: null;
 			// fail now rather than at the first episode
-			GymConfig.parse(specA, new Random());
-			GymConfig.parse(specB, new Random());
-			settings = new GymReferee.Settings(hours > 0 ? 0 : episodes,
+			for(String spec : new String[]{specA, specB})
+				if(!spec.equalsIgnoreCase("expert"))
+					GymConfig.parse(spec, new Random());
+				else if(expert == null)
+					throw new IllegalArgumentException(
+						"act=expert needs expert=<cfg>");
+			settings = new GymRun.Settings(hours > 0 ? 0 : episodes,
 				hours > 0 ? System.currentTimeMillis() + (long)(hours * 3.6e6)
 					: 0,
 				Integer.parseInt(opts.getOrDefault("ticks", "600")),
 				Double.parseDouble(opts.getOrDefault("health", "20")), specA,
-				specB, opts.containsKey("mirror"), seed, outputDir());
+				specB, opts.containsKey("mirror"), seed, outputDir(), expert,
+				Double.parseDouble(opts.getOrDefault("explore", "0")),
+				Float.parseFloat(opts.getOrDefault("tps", "20")),
+				Integer.parseInt(opts.getOrDefault("pairs", "1")));
+			if(settings.pairs() < 1 || settings.tickRate() <= 0)
+				throw new IllegalArgumentException(
+					"pairs and tps must be positive");
 		}catch(IllegalArgumentException e)
 		{
 			source
@@ -197,30 +225,38 @@ public final class GymCommand
 		}
 		
 		boolean self = opts.containsKey("self");
-		String[] players =
-			{self ? source.getPlayerOrException().getScoreboardName() : "Gym-A",
-				"Gym-B"};
+		ArrayList<String[]> players = new ArrayList<>();
+		for(int i = 0; i < settings.pairs(); i++)
+		{
+			String prefix = "Gym-" + (settings.pairs() > 1 ? i : "");
+			players.add(new String[]{self && i == 0
+				? source.getPlayerOrException().getScoreboardName()
+				: prefix + "A", prefix + "B"});
+		}
 		
 		// mobs would be targets too
 		GymReferee.command(server, "gamerule spawn_mobs false");
-		
 		// the bots log in offline, under made-up names
 		server.setUsesAuthentication(false);
-		if(!server.isPublished())
-			Minecraft.getInstance().execute(
-				() -> server.publishServer(MultiplayerScope.LAN, false, port));
+		if(server.isUsingWhitelist())
+			for(String[] pair : players)
+				for(String name : pair)
+					server.getPlayerList().getWhiteList().add(
+						new UserWhiteListEntry(NameAndId.createOffline(name)));
+		String address = "localhost:" + host.prepare(server);
 		
 		AgentProcess agents = null;
 		if(!opts.containsKey("noagents"))
 		{
 			List<String> missing = new ArrayList<>();
-			for(String name : players)
-				if(server.getPlayerList().getPlayerByName(name) == null)
-					missing.add(name);
+			for(String[] pair : players)
+				for(String name : pair)
+					if(server.getPlayerList().getPlayerByName(name) == null)
+						missing.add(name);
 			try
 			{
 				agents = missing.isEmpty() ? null
-					: AgentProcess.start(missing, port, settings.outDir());
+					: AgentProcess.start(missing, address, settings.outDir());
 			}catch(IOException e)
 			{
 				source.sendFailure(
@@ -229,22 +265,20 @@ public final class GymCommand
 			}
 		}
 		
-		Vec3 center = source.getPosition();
-		AABB box = arena(server).box(center);
-		referee = new GymReferee(server, arena(server), box, settings, players,
-			agents);
-		source.sendSuccess(() -> Component
-			.literal("SpearMace gym started on port " + port + ", seed " + seed
-				+ (arena(server).hasBox() ? ""
-					: ", arena 64x64 around you (set one with /gym arena)")
-				+ ". Data in " + settings.outDir()),
-			true);
+		AABB box = arena(server).box(source.getPosition());
+		run = new GymRun(server, arena(server), box, settings, players, agents);
+		source.sendSuccess(() -> Component.literal("SpearMace gym started at "
+			+ address + ", seed " + settings.seed() + ", " + settings.pairs()
+			+ " pair(s) at " + settings.tickRate() + " ticks/s"
+			+ (arena(server).hasBox() ? ""
+				: ", arena 128x128 around here (set one with /gym arena)")
+			+ ". Data in " + settings.outDir()), true);
 		return 1;
 	}
 	
 	private int stop(CommandContext<CommandSourceStack> c)
 	{
-		GymReferee r = referee();
+		GymRun r = run();
 		if(r == null)
 		{
 			c.getSource()
@@ -257,9 +291,9 @@ public final class GymCommand
 	
 	private int status(CommandContext<CommandSourceStack> c)
 	{
-		GymReferee r = referee();
+		GymRun r = run();
 		GymArena a = arena(c.getSource().getServer());
-		String message = (r == null ? "Not running" : r.status()) + ". Arena: "
+		String message = (r == null ? "Not running" : r.status()) + "\nArena: "
 			+ (a.hasBox() ? "set" : "none") + ", " + a.spawns().size()
 			+ " spawns, " + (a.hasKit() ? "custom" : "default") + " kit";
 		c.getSource().sendSuccess(() -> Component.literal(message), false);

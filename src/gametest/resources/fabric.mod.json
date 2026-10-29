@@ -4,8 +4,11 @@
   "version": "1.0.0",
   "name": "Wurst Test Mod",
   "license": "GPL-3.0-or-later",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
+    "main": [
+      "net.wurstclient.gametest.gym.SpearMaceGymServer"
+    ],
     "client": [
       "net.wurstclient.gametest.gym.SpearMaceGym"
     ],

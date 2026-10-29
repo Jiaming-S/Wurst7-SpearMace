@@ -50,6 +50,9 @@ public final class GymArena
 	private static final double MIN_START_DISTANCE = 6;
 	private static final double MAX_START_DISTANCE = 40;
 	
+	/** The most blocks {@code /clone} copies at once. */
+	private static final int CLONE_LIMIT = 32768;
+	
 	/** Hotbar slots, as in {@code SpearMaceTest}. */
 	private static final String[] DEFAULT_KIT =
 		{"hotbar.1 with netherite_spear[enchantments={\"minecraft:lunge\":3}]",
@@ -138,9 +141,15 @@ public final class GymArena
 	 * Two start points: random distinct spawns if there are two or more,
 	 * otherwise two floor spots in the box, a random distance apart.
 	 *
+	 * @param box
+	 *            the arena, already moved by {@code offset}
+	 * @param offset
+	 *            how far this copy of the arena is from the original,
+	 *            which the spawns are for
 	 * @return {@code null} if no two spots fit
 	 */
-	public Vec3[] sampleStarts(ServerLevel level, AABB box, Random random)
+	public Vec3[] sampleStarts(ServerLevel level, AABB box, Vec3 offset,
+		Random random)
 	{
 		if(spawns.size() >= 2)
 		{
@@ -148,7 +157,8 @@ public final class GymArena
 			int b = random.nextInt(spawns.size() - 1);
 			if(b >= a)
 				b++;
-			return new Vec3[]{spawns.get(a), spawns.get(b)};
+			return new Vec3[]{spawns.get(a).add(offset),
+				spawns.get(b).add(offset)};
 		}
 		
 		for(int attempt = 0; attempt < 100; attempt++)
@@ -194,6 +204,36 @@ public final class GymArena
 			return new Vec3(Math.floor(x) + 0.5, y + 1, Math.floor(z) + 0.5);
 		}
 		return null;
+	}
+	
+	/**
+	 * Copies the blocks of {@code box} by {@code offset}, in pieces small
+	 * enough for {@code /clone}. The chunks on both ends must be loaded.
+	 */
+	public void copyTo(MinecraftServer server, AABB box, Vec3 offset)
+	{
+		int minX = (int)Math.floor(box.minX);
+		int minY = (int)Math.floor(box.minY);
+		int minZ = (int)Math.floor(box.minZ);
+		int maxX = (int)Math.ceil(box.maxX) - 1;
+		int maxY = (int)Math.ceil(box.maxY) - 1;
+		int maxZ = (int)Math.ceil(box.maxZ) - 1;
+		int depth = maxZ - minZ + 1;
+		int height = maxY - minY + 1;
+		
+		// strips along x, as wide as fits a full-height slab
+		int stripWidth = Math.max(1, CLONE_LIMIT / (depth * height));
+		int slabHeight = Math.max(1, CLONE_LIMIT / (depth * stripWidth));
+		for(int x = minX; x <= maxX; x += stripWidth)
+			for(int y = minY; y <= maxY; y += slabHeight)
+			{
+				int x2 = Math.min(maxX, x + stripWidth - 1);
+				int y2 = Math.min(maxY, y + slabHeight - 1);
+				GymReferee.command(server,
+					String.format("clone %d %d %d %d %d %d %d %d %d", x, y,
+						minZ, x2, y2, maxZ, x + (int)offset.x,
+						y + (int)offset.y, minZ + (int)offset.z));
+			}
 	}
 	
 	public static GymArena load(MinecraftServer server)
