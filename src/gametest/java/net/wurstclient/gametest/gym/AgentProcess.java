@@ -40,7 +40,8 @@ import com.google.gson.JsonParser;
  * <p>
  * Without a display (Linux with no {@code DISPLAY}/{@code WAYLAND_DISPLAY}
  * or {@code WURST_GYM_HEADLESS=1}), the bots use SDL's offscreen video
- * driver and skip drawing the world.
+ * driver and skip drawing the world. {@code WURST_GYM_HEADLESS=0} makes
+ * them draw it in their windows either way.
  */
 public final class AgentProcess
 {
@@ -203,8 +204,9 @@ public final class AgentProcess
 	
 	private static boolean headless()
 	{
-		if("1".equals(System.getenv("WURST_GYM_HEADLESS")))
-			return true;
+		String forced = System.getenv("WURST_GYM_HEADLESS");
+		if(forced != null && !forced.isEmpty())
+			return "1".equals(forced);
 		return isLinux() && System.getenv("DISPLAY") == null
 			&& System.getenv("WAYLAND_DISPLAY") == null;
 	}

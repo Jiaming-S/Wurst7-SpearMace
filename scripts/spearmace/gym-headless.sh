@@ -5,7 +5,9 @@
 # (apt-get install mesa-vulkan-drivers); if they can't open a window, run
 # this under xvfb-run instead.
 #
-# Usage: scripts/spearmace/gym-headless.sh [start options]
+# Usage: scripts/spearmace/gym-headless.sh [--windowed] [start options]
+# --windowed makes the bots draw the world in their own windows, without
+# the host client that runSpearMaceGym adds, e.g. to watch a run.
 # Default options collect expert labels for distillation. See
 # net.wurstclient.gametest.gym.SpearMaceGym for all of them. Data goes to
 # spearmace-gym/<time>/ (or WURST_GYM_DIR). The server stops when the gym
@@ -14,6 +16,11 @@
 # The server only starts after you accept the Minecraft EULA
 # (https://aka.ms/MinecraftEULA), e.g. with WURST_GYM_ACCEPT_EULA=true.
 set -euo pipefail
+
+if [ "${1:-}" = "--windowed" ]; then
+	export WURST_GYM_HEADLESS=0
+	shift
+fi
 
 OPTIONS="${*:-hours=12 pairs=4 tps=4 health=100 act=beam:4x3 expert=mcts:4000 explore=0.1}"
 WURST_GYM_AUTOSTART="$OPTIONS" exec "$(dirname "$0")/gym-server.sh"
