@@ -273,7 +273,8 @@ public final class GymCommand
 			+ address + ", seed " + settings.seed() + ", " + settings.pairs()
 			+ " pair(s) at " + settings.tickRate() + " ticks/s"
 			+ (arena(server).hasBox() ? ""
-				: ", arena 128x128 around here (set one with /gym arena)")
+				: ", arena " + 2 * GymArena.RADIUS + "x" + 2 * GymArena.RADIUS
+					+ " around here (set one with /gym arena)")
 			+ ". Data in " + settings.outDir()), true);
 		return 1;
 	}

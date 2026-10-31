@@ -50,6 +50,9 @@ public final class GymArena
 	private static final double MIN_START_DISTANCE = 6;
 	private static final double MAX_START_DISTANCE = 40;
 	
+	/** Half the width of the default arena. */
+	public static final int RADIUS = 128;
+	
 	/** The most blocks {@code /clone} copies at once. */
 	private static final int CLONE_LIMIT = 32768;
 	
@@ -91,16 +94,16 @@ public final class GymArena
 	}
 	
 	/**
-	 * The box, or a 128x128 one around {@code center} if none is set, as
-	 * pearl catches easily carry the bots 20 blocks past each other. It
-	 * reaches far down, so that the floor is in it even if whoever started
-	 * the gym was flying.
+	 * The box, or one {@link #RADIUS} around {@code center} if none is set,
+	 * as pearl catches and lunges easily carry the bots 20 blocks past each
+	 * other. It reaches far down, so that the floor is in it even if
+	 * whoever started the gym was flying.
 	 */
 	public AABB box(Vec3 center)
 	{
 		if(from == null)
-			return new AABB(center.x - 64, center.y - 64, center.z - 64,
-				center.x + 64, center.y + 128, center.z + 64);
+			return new AABB(center.x - RADIUS, center.y - 64, center.z - RADIUS,
+				center.x + RADIUS, center.y + 128, center.z + RADIUS);
 		return new AABB(from.getX(), from.getY(), from.getZ(), to.getX() + 1,
 			to.getY() + 1, to.getZ() + 1);
 	}

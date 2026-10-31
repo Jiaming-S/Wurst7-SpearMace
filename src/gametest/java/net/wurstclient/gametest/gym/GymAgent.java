@@ -165,9 +165,9 @@ public final class GymAgent implements DecisionListener
 		// the options aren't loaded yet while mods initialize
 		ClientLifecycleEvents.CLIENT_STARTED.register(mc -> {
 			mc.options.pauseOnLostFocus = false;
-			// the bots must see each other 40+ blocks apart, even when
-			// they don't draw anything
-			mc.options.renderDistance().set(6);
+			// the bots must see each other across most of the arena, even
+			// when they don't draw anything
+			mc.options.renderDistance().set(10);
 			mc.options.framerateLimit().set(headless ? 10 : 30);
 			mc.options.getSoundSourceOptionInstance(SoundSource.MASTER)
 				.set(0.0);
