@@ -43,8 +43,8 @@ public final class GymCommand
 	private static final String USAGE = "/gym start [episodes]"
 		+ " [act=<cfg>] [a=<cfg>] [b=<cfg>] [expert=<cfg>] [explore=P]"
 		+ " [tps=N] [pairs=N] [mirror] [self] [noagents] [seed=N] [hours=H]"
-		+ " [ticks=N] [health=N]; cfg: rules, beam:WxD, mcts:N, random,"
-		+ " expert";
+		+ " [ticks=N] [health=N] [apples=N] [armor]; cfg: rules, beam:WxD,"
+		+ " mcts:N, random," + " expert";
 	
 	/**
 	 * The expert stops when its search is done, not at a time limit, so
@@ -213,7 +213,9 @@ public final class GymCommand
 				specB, opts.containsKey("mirror"), seed, outputDir(), expert,
 				Double.parseDouble(opts.getOrDefault("explore", "0")),
 				Float.parseFloat(opts.getOrDefault("tps", "20")),
-				Integer.parseInt(opts.getOrDefault("pairs", "1")));
+				Integer.parseInt(opts.getOrDefault("pairs", "1")),
+				Integer.parseInt(opts.getOrDefault("apples", "16")),
+				opts.containsKey("armor"));
 			if(settings.pairs() < 1 || settings.tickRate() <= 0)
 				throw new IllegalArgumentException(
 					"pairs and tps must be positive");

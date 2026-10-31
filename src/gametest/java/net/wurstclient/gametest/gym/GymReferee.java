@@ -106,6 +106,7 @@ public final class GymReferee
 		int blocked;
 		int windCharges;
 		int pearls;
+		int apples;
 	}
 	
 	/**
@@ -225,7 +226,8 @@ public final class GymReferee
 	private void reset(ServerPlayer player, Vec3 start, Vec3 facing)
 	{
 		player.setGameMode(GameType.SURVIVAL);
-		run.arena().giveKit(server, player);
+		run.arena().giveKit(server, player, settings.apples(),
+			settings.armor());
 		String uuid = player.getStringUUID();
 		command(server, "attribute " + uuid + " minecraft:max_health base set "
 			+ settings.health());
@@ -269,6 +271,7 @@ public final class GymReferee
 			ServerPlayer p = player(i);
 			stats[i].windCharges = count(p, Items.WIND_CHARGE);
 			stats[i].pearls = count(p, Items.ENDER_PEARL);
+			stats[i].apples = count(p, Items.GOLDEN_APPLE);
 			ServerPlayNetworking.send(p,
 				new Start(episode, fileSide(i), players[1 - i],
 					configs[i].toJson(), expert == null ? "" : expert.toJson(),
@@ -388,6 +391,8 @@ public final class GymReferee
 					s.windCharges - count(p, Items.WIND_CHARGE));
 				side.addProperty("pearlsUsed",
 					s.pearls - count(p, Items.ENDER_PEARL));
+				side.addProperty("applesEaten",
+					s.apples - count(p, Items.GOLDEN_APPLE));
 				side.addProperty("endHealth", p.getHealth());
 				side.add("end", GymJson.vec(p.position()));
 			}

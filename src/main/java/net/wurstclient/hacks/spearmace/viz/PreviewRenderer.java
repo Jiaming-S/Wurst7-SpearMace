@@ -137,6 +137,8 @@ public enum PreviewRenderer
 			case JABBED -> 0xFF60A0FF;
 			case APEX -> 0xFFFFFFFF;
 			case LANDED -> 0xFF40FF40;
+			case STARTED_EATING, ATE -> 0xFFFFD700;
+			case STOPPED_EATING -> 0xFF806000;
 		};
 	}
 	

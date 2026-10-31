@@ -226,7 +226,7 @@ public final class SpearMacePreviewHack extends Hack
 		
 		SelfState self = observed.self();
 		TickInput hold = new TickInput(null, self.move(), self.sprinting(),
-			self.jump(), -1, false, false);
+			self.jump(), -1, false, false, self.eating());
 		start = observed;
 		rollout = sim.rollout(observed,
 			Collections.nCopies(horizon.getValueI(), hold));

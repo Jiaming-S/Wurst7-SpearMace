@@ -22,6 +22,9 @@ public record Move(float left, float forward)
 {
 	private static final Minecraft MC = WurstClient.MC;
 	
+	/** {@code UseEffects.DEFAULT.speedMultiplier()} */
+	private static final float ITEM_USE_SPEED = 0.2F;
+	
 	public static final Move NONE = new Move(0, 0);
 	public static final Move FORWARD = new Move(0, 1);
 	
@@ -55,17 +58,30 @@ public record Move(float left, float forward)
 		return left != 0 || forward != 0;
 	}
 	
+	/** Without an item in use. */
+	public Vec3 acceleration(float speed, float yaw)
+	{
+		return acceleration(speed, yaw, false);
+	}
+	
 	/**
 	 * The velocity this input adds in one tick: {@code LocalPlayer
-	 * .modifyInput()} (without sneaking or item use), then
+	 * .modifyInput()} (without sneaking), then
 	 * {@code Entity.getInputVector()}.
+	 *
+	 * @param usingItem
+	 *            whether an item is in use, which slows the keys down to
+	 *            {@code UseEffects.DEFAULT}'s speed multiplier
 	 */
-	public Vec3 acceleration(float speed, float yaw)
+	public Vec3 acceleration(float speed, float yaw, boolean usingItem)
 	{
 		if(!isMoving())
 			return Vec3.ZERO;
 		
-		Vec2 input = squareMovement(new Vec2(left, forward).scale(0.98F));
+		Vec2 input = new Vec2(left, forward).scale(0.98F);
+		if(usingItem)
+			input = input.scale(ITEM_USE_SPEED);
+		input = squareMovement(input);
 		Vec3 movement = new Vec3(input.x, 0, input.y);
 		if(movement.lengthSqr() > 1)
 			movement = movement.normalize();

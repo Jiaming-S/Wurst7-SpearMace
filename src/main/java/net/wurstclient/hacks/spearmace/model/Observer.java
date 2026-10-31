@@ -15,8 +15,10 @@ import net.minecraft.world.phys.Vec3;
 import net.wurstclient.hacks.spearmace.sim.PearlSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.state.Pending;
+import net.wurstclient.hacks.spearmace.state.Pending.Ate;
 import net.wurstclient.hacks.spearmace.state.Pending.Impulse;
 import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
+import net.wurstclient.hacks.spearmace.state.Pending.SelfDamage;
 import net.wurstclient.hacks.spearmace.state.Pending.TargetDamage;
 import net.wurstclient.hacks.spearmace.state.Pending.Teleport;
 import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
@@ -82,8 +84,8 @@ public enum Observer
 			fall, p.impactY(), p.impulseGrace(), c.yaw(), c.pitch(), c.move(),
 			c.sprinting(), c.jump(), c.fallFlying(), c.attackStrengthTicker(),
 			c.heldChanged(), c.missTime(), c.interactionRange(),
-			c.knockbackResistance(), c.kit().withCooldownsFrom(p.kit()),
-			pending);
+			c.knockbackResistance(), c.vitals(), c.useTicks(),
+			c.kit().withCooldownsFrom(p.kit()), pending);
 		TargetState target = captured.target() == null ? null
 			: captured.target().withTimersFrom(predicted.target());
 		return new GameState(self, target);
@@ -226,6 +228,17 @@ public enum Observer
 			return d.applyAt() == next && captured.target() != null
 				&& predicted.target() != null && captured.target()
 					.health() < predicted.target().health() - d.damage() / 2;
+			
+			case SelfDamage d:
+			return d.applyAt() == next && c.vitals().health()
+				+ c.vitals().absorption() < predicted.self().vitals().health()
+					+ predicted.self().vitals().absorption() - d.damage() / 2;
+			
+			case Ate a:
+			return a.applyAt() == next && (c.vitals().regenTicks() > predicted
+				.self().vitals().regenTicks()
+				|| c.kit().get(a.slot()).getCount() < predicted.self().kit()
+					.get(a.slot()).getCount());
 			
 			case Impulse i:
 			if(i.applied() || i.applyAt() != next)

@@ -18,39 +18,52 @@ import net.wurstclient.util.Rotation;
  *            the view, or {@code null} to keep it
  * @param slot
  *            the hotbar key to click, or -1
+ * @param use
+ *            whether to click the use key
+ * @param useHeld
+ *            whether to hold the use key down, which eating needs
  */
 public record TickInput(Rotation rotation, Move move, boolean sprint,
-	boolean jump, int slot, boolean attack, boolean use)
+	boolean jump, int slot, boolean attack, boolean use, boolean useHeld)
 {
 	/** Keeps looking where it does and holds nothing. */
 	public static final TickInput NONE =
-		new TickInput(null, Move.NONE, false, false, -1, false, false);
+		new TickInput(null, Move.NONE, false, false, -1, false, false, false);
 	
 	public TickInput withRotation(Rotation newRotation)
 	{
-		return new TickInput(newRotation, move, sprint, jump, slot, attack,
-			use);
+		return new TickInput(newRotation, move, sprint, jump, slot, attack, use,
+			useHeld);
 	}
 	
 	public TickInput withSlot(int newSlot)
 	{
-		return new TickInput(rotation, move, sprint, jump, newSlot, attack,
-			use);
+		return new TickInput(rotation, move, sprint, jump, newSlot, attack, use,
+			useHeld);
 	}
 	
 	public TickInput withAttack()
 	{
-		return new TickInput(rotation, move, sprint, jump, slot, true, use);
+		return new TickInput(rotation, move, sprint, jump, slot, true, use,
+			useHeld);
 	}
 	
 	public TickInput withUse()
 	{
-		return new TickInput(rotation, move, sprint, jump, slot, attack, true);
+		return new TickInput(rotation, move, sprint, jump, slot, attack, true,
+			useHeld);
+	}
+	
+	public TickInput withUseHeld(boolean held)
+	{
+		return new TickInput(rotation, move, sprint, jump, slot, attack, use,
+			held);
 	}
 	
 	public TickInput withJump()
 	{
-		return new TickInput(rotation, move, sprint, true, slot, attack, use);
+		return new TickInput(rotation, move, sprint, true, slot, attack, use,
+			useHeld);
 	}
 	
 	@Override
@@ -72,6 +85,8 @@ public record TickInput(Rotation rotation, Move move, boolean sprint,
 			sb.append(" attack");
 		if(use)
 			sb.append(" use");
+		if(useHeld)
+			sb.append(" holdUse");
 		return sb.append(']').toString();
 	}
 }

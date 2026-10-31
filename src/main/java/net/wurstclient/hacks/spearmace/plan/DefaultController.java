@@ -20,7 +20,8 @@ import net.wurstclient.hacks.spearmace.state.SelfState;
  * What to do with the channels no action claims during a fight: look at
  * the target, release the movement keys, and while in the air hold the
  * longest-charging pre-item, so that the next strike is charged by the
- * time it starts.
+ * time it starts. A golden apple that is being eaten is finished first,
+ * unless the action switches items.
  */
 public final class DefaultController implements Controller
 {
@@ -40,7 +41,13 @@ public final class DefaultController implements Controller
 			run = run.withRotation(
 				Engagement.aim(self.eyePos(), s.target().box().getCenter()));
 		
-		if(!run.claims().contains(Channel.HOTBAR) && !self.onGround())
+		// the use key is only held while eating, see Eat.keepEating()
+		boolean eating = self.useTicks() > 1 && run.input().slot() < 0;
+		if(!run.claims().contains(Channel.USE))
+			run = run.holdingUse(eating);
+		
+		if(!run.claims().contains(Channel.HOTBAR) && !self.onGround()
+			&& !eating)
 		{
 			int slot = preItem(self.kit());
 			if(slot >= 0 && slot != self.kit().selected())

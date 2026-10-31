@@ -32,17 +32,21 @@ import net.wurstclient.hacks.spearmace.sim.WindChargeSim;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.Pending;
+import net.wurstclient.hacks.spearmace.state.Pending.Ate;
 import net.wurstclient.hacks.spearmace.state.Pending.Impulse;
 import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
 import net.wurstclient.hacks.spearmace.state.Pending.Projectile;
 import net.wurstclient.hacks.spearmace.state.Pending.ServerAttack;
 import net.wurstclient.hacks.spearmace.state.Pending.ServerLunge;
+import net.wurstclient.hacks.spearmace.state.Pending.SelfDamage;
 import net.wurstclient.hacks.spearmace.state.Pending.ServerUse;
 import net.wurstclient.hacks.spearmace.state.Pending.TargetDamage;
 import net.wurstclient.hacks.spearmace.state.Pending.Teleport;
 import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
 import net.wurstclient.hacks.spearmace.state.SelfState;
 import net.wurstclient.hacks.spearmace.state.TargetState;
+import net.wurstclient.hacks.spearmace.state.Vitals;
+import net.wurstclient.hacks.spearmace.state.Vitals.Apple;
 import net.wurstclient.util.Rotation;
 
 /**
@@ -71,8 +75,16 @@ import net.wurstclient.util.Rotation;
  * {@link SelfState#impactY()}).
  *
  * <p>
- * Not modelled: blocks in the way of the crosshair pick, armor, effects,
- * and projectiles hitting entities.
+ * Eating a golden apple takes {@link Apple#EAT_TICKS} with the use key
+ * held, slows the movement keys and swallows other clicks. Its effects,
+ * like fall damage, show up a few ticks after the server has them.
+ * Regeneration heals as the client counts it down.
+ *
+ * <p>
+ * Not modelled: blocks in the way of the crosshair pick, armor, effects
+ * other than Regeneration, Absorption and Resistance, other things to eat,
+ * damage from anything but falls and pearl teleports, and projectiles
+ * hitting entities.
  */
 public final class TickSim
 {
@@ -98,6 +110,15 @@ public final class TickSim
 	 * ticks before standing on the ground clears the impact position.
 	 */
 	public static final int IMPULSE_GRACE = 40;
+	
+	/**
+	 * A golden apple the server finished in tick {@code n} shows up at
+	 * tick n + this (measured).
+	 */
+	public static final int EAT_DELAY = 3;
+	
+	/** {@code ThrownEnderpearl.onHit()} hurts the player this much. */
+	public static final double PEARL_DAMAGE = 5;
 	
 	/** Fall distance that doesn't hurt ({@code SAFE_FALL_DISTANCE}). */
 	public static final double SAFE_FALL = 3;
@@ -168,6 +189,8 @@ public final class TickSim
 		private int ticker;
 		private boolean heldChanged;
 		private int missTime;
+		private Vitals vitals;
+		private int useTicks;
 		private Kit kit;
 		private TargetState target;
 		private double damageDealt;
@@ -193,6 +216,8 @@ public final class TickSim
 			ticker = before.attackStrengthTicker();
 			heldChanged = before.heldChanged();
 			missTime = before.missTime();
+			vitals = before.vitals();
+			useTicks = before.useTicks();
 			kit = before.kit();
 			target = state.target();
 		}
@@ -205,14 +230,21 @@ public final class TickSim
 				pitch = input.rotation().pitch();
 			}
 			move = input.move();
-			sprinting = input.sprint();
+			// LocalPlayer.canStartSprinting(): not while eating
+			sprinting = input.sprint() && (sprinting || useTicks == 0);
 			jump = input.jump();
+			
+			// LivingEntity.tick(): effects, then the item in use, then the
+			// movement
+			vitals = vitals.ticked();
+			tickEating();
 			
 			PlayerSim sim = new PlayerSim(level, pos, vel, onGround);
 			sim.yaw = yaw;
 			sim.move = move;
 			sim.sprinting = sprinting;
 			sim.jump = jump;
+			sim.usingItem = useTicks > 0 || events.contains(Event.ATE);
 			sim.step();
 			sprinting = sim.sprinting;
 			
@@ -257,6 +289,32 @@ public final class TickSim
 		}
 		
 		/**
+		 * {@code LivingEntity.updatingUsingItem()}: eating stops when the
+		 * held item changes. The server finishes it, and the client keeps
+		 * using the item until it hears so, which is before its next
+		 * {@code handleKeybinds()}.
+		 */
+		private void tickEating()
+		{
+			if(useTicks <= 0)
+				return;
+			
+			Apple apple = Kit.apple(kit.held());
+			if(apple == null)
+			{
+				useTicks = 0;
+				events.add(Event.STOPPED_EATING);
+				return;
+			}
+			
+			if(--useTicks > 0)
+				return;
+			
+			events.add(Event.ATE);
+			pending.add(new Ate(serverTick + EAT_DELAY, apple, kit.selected()));
+		}
+		
+		/**
 		 * {@code LivingEntity.causeFallDamage()} and
 		 * {@code calculateFallDamage()}
 		 */
@@ -267,6 +325,9 @@ public final class TickSim
 			fallDamage = Math.max(0, Math.floor(counted + 1e-6 - SAFE_FALL));
 			if(counted <= 0 || fallDamage > 0)
 				impactY = Double.NaN;
+			if(fallDamage > 0)
+				pending
+					.add(new SelfDamage(serverTick + MOTION_DELAY, fallDamage));
 		}
 		
 		/** {@code LivingEntity.setIgnoreFallDamageFromCurrentImpulse()} */
@@ -305,6 +366,7 @@ public final class TickSim
 						pos = t.to();
 						vel = Vec3.ZERO;
 						onGround = false;
+						vitals = vitals.hurt(PEARL_DAMAGE);
 						pending.set(pending.indexOf(t), t.asApplied());
 						events.add(Event.TELEPORTED);
 					}
@@ -313,6 +375,18 @@ public final class TickSim
 						if(target != null)
 							target = target.withHealthLost(d.damage());
 						pending.remove(d);
+					}
+					case SelfDamage d when d.applyAt() == tick ->
+					{
+						vitals = vitals.hurt(d.damage());
+						pending.remove(d);
+					}
+					case Ate a when a.applyAt() == tick ->
+					{
+						vitals = vitals.ate(a.apple());
+						if(Kit.apple(kit.get(a.slot())) == a.apple())
+							kit = kit.withConsumed(a.slot());
+						pending.remove(a);
 					}
 					default ->
 						{
@@ -514,7 +588,22 @@ public final class TickSim
 					heldChanged = true;
 			}
 			
-			if(input.use())
+			// Minecraft.handleKeybinds(): while using an item, letting go
+			// of the use key stops it, and clicks do nothing
+			if(useTicks > 0)
+			{
+				if(!input.useHeld())
+				{
+					useTicks = 0;
+					events.add(Event.STOPPED_EATING);
+				}
+				pending.addAll(sent);
+				return;
+			}
+			
+			// a held use key starts again by itself, ignoring
+			// rightClickDelay
+			if(input.use() || input.useHeld() && Kit.isGoldenApple(kit.held()))
 				use();
 			if(input.attack())
 				attack(picked);
@@ -528,7 +617,11 @@ public final class TickSim
 			if(!kit.isReady(held))
 				return;
 			
-			if(held.is(Items.WIND_CHARGE))
+			if(Kit.isGoldenApple(held))
+			{
+				useTicks = Apple.EAT_TICKS;
+				events.add(Event.STARTED_EATING);
+			}else if(held.is(Items.WIND_CHARGE))
 				throwProjectile(Projectile.WIND_CHARGE, WIND_CHARGE_COOLDOWN,
 					Event.THREW_WIND_CHARGE);
 			else if(held.is(Items.ENDER_PEARL))
@@ -620,8 +713,8 @@ public final class TickSim
 			SelfState self = new SelfState(tick, pos, vel, onGround, fall,
 				impactY, impulseGrace, yaw, pitch, move, sprinting, jump,
 				before.fallFlying(), ticker, heldChanged, missTime,
-				before.interactionRange(), before.knockbackResistance(), kit,
-				pending);
+				before.interactionRange(), before.knockbackResistance(), vitals,
+				useTicks, kit, pending);
 			return new Transition(new GameState(self, target), events,
 				damageDealt, fallDamage);
 		}

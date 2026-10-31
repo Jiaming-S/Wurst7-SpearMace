@@ -188,4 +188,19 @@ public sealed interface Pending
 	/** Damage the client sees the target take at {@code applyAt}. */
 	public record TargetDamage(int applyAt, double damage) implements Pending
 	{}
+	
+	/**
+	 * Damage the client sees the player take at {@code applyAt}, before
+	 * Resistance and absorption.
+	 */
+	public record SelfDamage(int applyAt, double damage) implements Pending
+	{}
+	
+	/**
+	 * A golden apple the server finished eating, whose effects and used up
+	 * item the client sees at {@code applyAt}.
+	 */
+	public record Ate(int applyAt, Vitals.Apple apple, int slot)
+		implements Pending
+	{}
 }

@@ -41,7 +41,8 @@ public enum GymPlanners
 		};
 		Weights d = Weights.DEFAULT;
 		Weights weights = new Weights(c.fallDamage(), c.windCharge(), c.pearl(),
-			d.tick(), c.height(), d.maxHeight(), d.ready(), c.distance());
+			d.tick(), c.height(), d.maxHeight(), d.ready(), c.distance(),
+			d.health(), d.apple(), d.threat());
 		return SpearMaceHack.planner(new SpearMaceHack.Config(kind, c.width(),
 			c.depth(), c.iterations(), c.budget(), weights));
 	}

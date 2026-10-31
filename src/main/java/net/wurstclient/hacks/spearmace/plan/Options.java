@@ -22,9 +22,12 @@ import net.wurstclient.hacks.spearmace.combat.StrikeSelector.Decision;
 import net.wurstclient.hacks.spearmace.combat.StunSlam;
 import net.wurstclient.hacks.spearmace.maneuver.Cushion;
 import net.wurstclient.hacks.spearmace.maneuver.Drift;
+import net.wurstclient.hacks.spearmace.maneuver.Eat;
+import net.wurstclient.hacks.spearmace.maneuver.Escape;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
 import net.wurstclient.hacks.spearmace.maneuver.WindChargeJump;
+import net.wurstclient.hacks.spearmace.plan.eval.DamageRace;
 import net.wurstclient.hacks.spearmace.state.GameState;
 import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.SelfState;
@@ -48,6 +51,16 @@ import net.wurstclient.util.Rotation;
  * other strikes, then a pearl catch straight up if the fall is still
  * short</li>
  * <li>falling anywhere: a {@link Cushion} if the landing would hurt</li>
+ * </ul>
+ * Golden apples:
+ * <ul>
+ * <li>low on health on the ground close to the target: first an
+ * {@link Escape} away from it</li>
+ * <li>vertical pearl catches eat while they wait, if an apple is worth
+ * it</li>
+ * <li>on the ground far from the target without absorption: first an
+ * {@link Eat} (pre-gapping)</li>
+ * <li>rising or falling: an {@link Eat}, first if health is low</li>
  * </ul>
  * Every list ends with a {@link Hold}, which always works.
  */
@@ -98,17 +111,25 @@ public final class Options
 	private static final int HOLD = 10;
 	private static final int HOLD_RISING = 40;
 	
+	/** Less effective health than this close to the target is an emergency. */
+	private static final double EMERGENCY_HEALTH = 8;
+	
 	public List<Action> of(Level level, GameState s)
 	{
 		ArrayList<Action> actions = new ArrayList<>();
 		SelfState self = s.self();
 		boolean far = s.targetAlive() && horizontalDistance(s) > LAUNCH_RANGE;
+		boolean eat = Eat.worthEating(self);
+		boolean lowHealth = self.expectedHealth() < DamageRace.LOW_HEALTH;
+		if(s.targetAlive() && inDanger(s))
+			actions.add(new Escape(towardYaw(s) + 180));
 		if(s.targetAlive() && below(s) && !(self.vel().y > RISING))
 			addVerticalCatch(s, actions);
 		if(!s.targetAlive())
 			actions.add(new Hold("no target", HOLD));
 		else if(self.vel().y > RISING)
 		{
+			addIfNew(actions, new Eat(), eat && lowHealth);
 			// right after a launch the player is still on the ground
 			// near the target, the rules wait for the apex
 			if(far)
@@ -116,8 +137,11 @@ public final class Options
 			Hold hold = new Hold("rising", HOLD_RISING);
 			Drift drift = new Drift(HOLD_RISING);
 			actions.addAll(far ? List.of(drift, hold) : List.of(hold, drift));
+			addIfNew(actions, new Eat(), eat);
 		}else if(self.onGround())
 		{
+			addIfNew(actions, new Eat(),
+				far && eat && self.vitals().absorption() <= 0);
 			if(far)
 				addApproach(s, actions, true);
 			else
@@ -137,6 +161,7 @@ public final class Options
 				if(height(s) < LOW)
 					addVerticalCatch(s, actions);
 			}
+			addIfNew(actions, new Eat(), eat);
 			addIfNew(actions, new Cushion(), self.kit().hasWindCharge()
 				&& Cushion.landingDamage(level, self) > 0);
 			actions.add(new Drift(HOLD));
@@ -173,10 +198,23 @@ public final class Options
 	
 	private static void addVerticalCatch(GameState s, List<Action> actions)
 	{
+		PearlCatch vertical = new PearlCatch(
+			new Rotation(towardYaw(s), VERTICAL_PITCH), CATCH_DELAY);
 		addIfNew(actions,
-			new PearlCatch(new Rotation(towardYaw(s), VERTICAL_PITCH),
-				CATCH_DELAY),
+			Eat.worthEating(s.self()) ? vertical.eating() : vertical,
 			canCatch(s.self().kit()));
+	}
+	
+	/**
+	 * Low on health on the ground close to the target, with what an
+	 * {@link Escape} needs.
+	 */
+	private static boolean inDanger(GameState s)
+	{
+		SelfState self = s.self();
+		return self.onGround() && self.expectedHealth() < EMERGENCY_HEALTH
+			&& self.pos().distanceTo(s.target().pos()) < DamageRace.THREAT_RANGE
+			&& self.kit().windCharge() >= 0 && self.kit().goldenApple() >= 0;
 	}
 	
 	private static boolean canCatch(Kit kit)

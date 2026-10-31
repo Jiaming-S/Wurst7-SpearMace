@@ -192,7 +192,7 @@ public record Cushion() implements Action
 	private static TickInput held(SelfState self)
 	{
 		return new TickInput(null, self.move(), self.sprinting(), self.jump(),
-			-1, false, false);
+			-1, false, false, self.eating());
 	}
 	
 	/**

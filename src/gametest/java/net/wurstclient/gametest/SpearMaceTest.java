@@ -47,6 +47,7 @@ import net.minecraft.world.phys.Vec3;
 import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.SpearMaceHack;
 import net.wurstclient.hacks.spearmace.action.Action;
+import net.wurstclient.hacks.spearmace.action.Hold;
 import net.wurstclient.hacks.spearmace.action.ActionRunner;
 import net.wurstclient.hacks.spearmace.action.ActionRunner.Result;
 import net.wurstclient.hacks.spearmace.action.ActionRunner.StartCondition;
@@ -64,6 +65,9 @@ import net.wurstclient.hacks.spearmace.combat.StunSlam.Slammed;
 import net.wurstclient.hacks.spearmace.action.Step;
 import net.wurstclient.hacks.spearmace.input.KeyInput;
 import net.wurstclient.hacks.spearmace.maneuver.Cushion;
+import net.wurstclient.hacks.spearmace.maneuver.Eat;
+import net.wurstclient.hacks.spearmace.maneuver.Eat.Eaten;
+import net.wurstclient.hacks.spearmace.maneuver.Escape;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatch.Caught;
 import net.wurstclient.hacks.spearmace.maneuver.SpearLunge;
@@ -114,7 +118,8 @@ import net.wurstclient.util.Rotation;
  * is set to {@code keys} ({@code all} runs everything). {@code catchdata}
  * collects pearl catch training data instead, see
  * {@link CatchDataCollector}; {@code all} leaves it out. {@code cushion}
- * checks fall damage against the model and {@link Cushion}.
+ * checks fall damage against the model and {@link Cushion}, {@code heal}
+ * eating golden apples and the health the model expects.
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
@@ -180,7 +185,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private ShieldDummy shieldDummy;
 	
 	private static final List<String> OPT_IN_GROUPS =
-		List.of("hard", "keys", "catchdata", "cushion");
+		List.of("hard", "keys", "catchdata", "cushion", "heal");
 	
 	public static boolean isEnabled()
 	{
@@ -274,6 +279,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 			
 			if(runs("cushion"))
 				runCushionTests(context, server, failures);
+			
+			if(runs("heal"))
+				runHealTests(context, server, failures);
 			
 			if("catchdata".equals(System.getenv("WURST_SPEARMACE_TEST")))
 				new CatchDataCollector(context, server,
@@ -1117,6 +1125,215 @@ public final class SpearMaceTest implements FabricClientGameTest
 		{
 			return s.self().onGround() ? Step.done(null) : Step.idle(this);
 		}
+	}
+	
+	/** The hotbar slot that {@link #resetForHealing} puts apples in. */
+	private static final int APPLE_SLOT = 6;
+	
+	private void runHealTests(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		// in peaceful, health would come back by itself
+		runCommand(server, "gamerule natural_health_regeneration false");
+		testEatOnGround(context, server, failures);
+		testEatWhileFalling(context, server, failures);
+		testInterruptedEat(context, server, failures);
+		testEatingCatch(context, server, failures);
+		testEscape(context, server, failures);
+		runCommand(server, "gamerule natural_health_regeneration true");
+	}
+	
+	/**
+	 * {@link #reset}, without the effects that keep the player from losing
+	 * health, with golden apples and {@code health} left.
+	 */
+	private void resetForHealing(ClientGameTestContext context,
+		TestServerContext server, float health)
+	{
+		reset(context, server);
+		runCommand(server, "effect clear @p");
+		runCommand(server, "item replace entity @p hotbar." + APPLE_SLOT
+			+ " with golden_apple 4");
+		server.runOnServer(mc -> getServerPlayer(mc).setHealth(health));
+		context.waitTicks(3);
+	}
+	
+	/** Health, absorption and golden apples on the server. */
+	private record Vitals(float health, float absorption, int apples)
+	{
+		@Override
+		public String toString()
+		{
+			return String.format("health=%.1f absorption=%.1f apples=%d",
+				health, absorption, apples);
+		}
+	}
+	
+	private static Vitals serverVitals(TestServerContext server)
+	{
+		return server.computeOnServer(mc -> {
+			ServerPlayer p = getServerPlayer(mc);
+			return new Vitals(p.getHealth(), p.getAbsorptionAmount(),
+				p.getInventory().countItem(Items.GOLDEN_APPLE));
+		});
+	}
+	
+	/**
+	 * Eats at half health, then waits out the Regeneration: 4 health and 4
+	 * absorption.
+	 */
+	private void testEatOnGround(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Eat on the ground";
+		resetForHealing(context, server, 10);
+		List<Result> results = run(context, name, 150, r -> {
+			r.enqueue(new Eat());
+			r.enqueue(new Hold("regenerating", 110));
+		});
+		Vitals after = serverVitals(server);
+		LOGGER.info("SM: {} {} {}", name, after, results);
+		checkEaten(failures, name, results, after, 3);
+		if(after.health() != 14 || after.absorption() != 4)
+			failures.add(
+				name + ": expected 14 health and 4 absorption, got " + after);
+	}
+	
+	/**
+	 * Eats while falling with forward held, which eating slows down, and
+	 * lands with the fall damage the model predicted.
+	 */
+	private void testEatWhileFalling(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Eat while falling";
+		resetForHealing(context, server, 20);
+		runCommand(server, "tp @p ~ ~12 ~ 0 0");
+		context.waitFor(mc -> !mc.player.onGround());
+		context.runOnClient(mc -> mc.options.keyUp.setDown(true));
+		double[] landing = runLanding(context, name, r -> r.enqueue(new Eat()));
+		releaseKeys(context);
+		
+		Vitals after = serverVitals(server);
+		LOGGER.info("SM: {} {}", name, after);
+		checkLanding(context, name, failures, -1, landing);
+		if(after.apples() != 3)
+			failures.add(name + ": not eaten, " + after);
+	}
+	
+	/** Switching items stops eating without using up the apple. */
+	private void testInterruptedEat(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Interrupted eat";
+		resetForHealing(context, server, 10);
+		List<Result> results = run(context, name, 60,
+			r -> r.enqueueAnyway(new Interrupt(new Eat(), 15)));
+		context.waitTicks(5);
+		
+		Vitals after = serverVitals(server);
+		LOGGER.info("SM: {} {} {}", name, after, results);
+		if(after.apples() != 4 || after.absorption() != 0)
+			failures.add(name + ": an apple was eaten, " + after);
+	}
+	
+	/**
+	 * A vertical catch next to the target eats while it waits, finishes the
+	 * apple after the teleport, and still strikes on the way down.
+	 */
+	private void testEatingCatch(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Eating catch";
+		resetForHealing(context, server, 10);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		double[] landing = runLanding(context, name, r -> {
+			r.enqueue(new PearlCatch(UP, 3).eating());
+			r.enqueueAnyway(new Eat());
+			r.enqueueAnyway(new MaceStrike(PreItem.HAND));
+		});
+		List<Result> results = runner.results();
+		Vitals after = serverVitals(server);
+		LOGGER.info("SM: {} {} {}", name, after, results);
+		checkLanding(context, name, failures, -1, landing);
+		if(results.stream().noneMatch(r -> r.payload(Caught.class) != null))
+			failures.add(name + ": not caught: " + results);
+		if(results.stream().noneMatch(r -> r.payload(Eaten.class) != null)
+			|| after.apples() != 3)
+			failures.add(name + ": not eaten: " + after + " " + results);
+		if(results.stream().noneMatch(r -> r.payload(Struck.class) != null))
+			failures.add(name + ": no strike: " + results);
+	}
+	
+	/**
+	 * Low on health next to the target, an escape launches away from it
+	 * and eats in the air.
+	 */
+	private void testEscape(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Escape";
+		resetForHealing(context, server, 6);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		double[] landing =
+			runLanding(context, name, r -> r.enqueue(new Escape(180)));
+		List<Result> results = runner.results();
+		Vitals after = serverVitals(server);
+		double distance = playerPos(context)
+			.distanceTo(new Vec3(TARGET_X, GROUND_Y, TARGET_Z));
+		LOGGER.info("SM: {} {} distance={} {}", name, after, fmt(distance),
+			results);
+		checkLanding(context, name, failures, -1, landing);
+		checkEaten(failures, name, results, after, 3);
+		if(distance < 6)
+			failures.add(name + ": only " + fmt(distance) + " away");
+	}
+	
+	/**
+	 * Runs {@code inner} for {@code ticks} updates, then switches to the
+	 * hand slot.
+	 */
+	private record Interrupt(Action inner, int ticks) implements Action
+	{
+		@Override
+		public String name()
+		{
+			return "Interrupt";
+		}
+		
+		@Override
+		public Step next(Level level, GameState s)
+		{
+			if(ticks < 0)
+				return Step.done(null);
+			if(ticks == 0)
+				return Step.idle(new Interrupt(null, -1)).withSlot(HAND_SLOT)
+					.holdingUse(false);
+			
+			Step step = inner.next(level, s);
+			return step instanceof Step.Run run
+				? run.withThen(new Interrupt(run.then(), ticks - 1)) : step;
+		}
+	}
+	
+	private static void checkEaten(List<String> failures, String name,
+		List<Result> results, Vitals after, int apples)
+	{
+		if(results.isEmpty() || results.getFirst().status() != Status.DONE
+			|| results.getFirst().payload(Eaten.class) == null)
+			failures.add(name + ": not eaten: " + results);
+		if(after.apples() != apples)
+			failures.add(name + ": " + after.apples() + " apples left");
 	}
 	
 	private void runCombatTests(ClientGameTestContext context,
@@ -2074,6 +2291,9 @@ public final class SpearMaceTest implements FabricClientGameTest
 			f.steps().stream().filter(s -> s.vel() > 0.05).count() <= 2);
 		check(failures, name, "target health errors", f.steps().stream()
 			.filter(s -> Math.abs(s.targetHealth()) > 1).count() <= 1);
+		check(failures, name, "own health errors", f.steps().stream()
+			.filter(s -> Math.abs(s.health()) > 0.01).count() <= 2);
+		check(failures, name, "eating errors", f.max(StepError::useTicks) == 0);
 	}
 	
 	/** Checks the forward model against what really happened. */
@@ -2249,6 +2469,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			IKeyMapping.get(mc.options.keyRight).resetDownState();
 			IKeyMapping.get(mc.options.keySprint).resetDownState();
 			IKeyMapping.get(mc.options.keyJump).resetDownState();
+			IKeyMapping.get(mc.options.keyUse).resetDownState();
 			mc.player.setSprinting(false);
 		});
 	}

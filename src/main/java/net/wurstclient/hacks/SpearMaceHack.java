@@ -119,6 +119,21 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 				+ " Higher values close in more eagerly.",
 			Weights.DEFAULT.distance(), 0, 5, 0.1, ValueDisplay.DECIMAL);
 	
+	private final SliderSetting healthValue = new SliderSetting("Health value",
+		"How much each point of SpearMace's own health is worth, compared to"
+			+ " dealing the same damage. Low health counts more.",
+		Weights.DEFAULT.health(), 0, 5, 0.1, ValueDisplay.DECIMAL);
+	
+	private final SliderSetting appleCost = new SliderSetting(
+		"Golden apple cost", "How much healing a golden apple has to be worth.",
+		Weights.DEFAULT.apple(), 0, 20, 0.5, ValueDisplay.DECIMAL);
+	
+	private final SliderSetting threatPenalty =
+		new SliderSetting("Threat penalty",
+			"How much SpearMace avoids staying close to the target with low"
+				+ " health.",
+			Weights.DEFAULT.threat(), 0, 20, 0.5, ValueDisplay.DECIMAL);
+	
 	private final EntityFilterList entityFilters =
 		EntityFilterList.genericMeleeCombat();
 	
@@ -143,6 +158,9 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 		addSetting(pearlCost);
 		addSetting(heightValue);
 		addSetting(distancePenalty);
+		addSetting(healthValue);
+		addSetting(appleCost);
+		addSetting(threatPenalty);
 		entityFilters.forEach(this::addSetting);
 	}
 	
@@ -223,10 +241,11 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 	private Config config()
 	{
 		Weights d = Weights.DEFAULT;
-		Weights weights =
-			new Weights(fallDamageWeight.getValue(), windChargeCost.getValue(),
-				pearlCost.getValue(), d.tick(), heightValue.getValue(),
-				d.maxHeight(), d.ready(), distancePenalty.getValue());
+		Weights weights = new Weights(fallDamageWeight.getValue(),
+			windChargeCost.getValue(), pearlCost.getValue(), d.tick(),
+			heightValue.getValue(), d.maxHeight(), d.ready(),
+			distancePenalty.getValue(), healthValue.getValue(),
+			appleCost.getValue(), threatPenalty.getValue());
 		return new Config(search.getSelected(), beamWidth.getValueI(),
 			lookahead.getValueI(), iterations.getValueI(), budget.getValueI(),
 			weights);

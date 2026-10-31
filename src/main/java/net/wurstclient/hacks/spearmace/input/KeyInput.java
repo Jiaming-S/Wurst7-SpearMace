@@ -74,7 +74,8 @@ public enum KeyInput
 			new Rotation(MC.player.getYRot(), MC.player.getXRot()),
 			Move.ofHeldKeys(), MC.player.isSprinting(),
 			MC.options.keyJump.isDown(), now ? clickedSlot : -1,
-			now && clickedAttack, now && clickedUse);
+			now && clickedAttack, now && clickedUse,
+			MC.options.keyUse.isDown());
 	}
 	
 	private static void note()
@@ -90,7 +91,8 @@ public enum KeyInput
 	
 	/**
 	 * Presses an action's input on the channels it claims. Clicks are
-	 * always pressed, held keys and the view only where claimed.
+	 * always pressed, held keys and the view only where claimed. Claiming
+	 * {@link Channel#USE} also holds or releases the use key.
 	 */
 	public static void apply(TickInput input, Set<Channel> claims)
 	{
@@ -106,6 +108,8 @@ public enum KeyInput
 		}
 		if(claims.contains(Channel.JUMP))
 			holdJump(input.jump());
+		if(claims.contains(Channel.USE))
+			hold(MC.options.keyUse, input.useHeld());
 		if(input.slot() >= 0)
 			selectSlot(input.slot());
 		if(input.attack())
@@ -123,6 +127,7 @@ public enum KeyInput
 		hold(MC.options.keyRight, false);
 		hold(MC.options.keySprint, false);
 		hold(MC.options.keyJump, false);
+		hold(MC.options.keyUse, false);
 	}
 	
 	private static void hold(KeyMapping key, boolean held)

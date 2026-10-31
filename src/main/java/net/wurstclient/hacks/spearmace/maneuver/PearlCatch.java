@@ -17,6 +17,7 @@ import net.minecraft.world.phys.Vec3;
 import net.wurstclient.hacks.spearmace.action.Action;
 import net.wurstclient.hacks.spearmace.action.Prediction;
 import net.wurstclient.hacks.spearmace.action.Step;
+import net.wurstclient.hacks.spearmace.action.Step.Run;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatchPlanner.PearlInfo;
 import net.wurstclient.hacks.spearmace.maneuver.PearlCatchPlanner.Plan;
 import net.wurstclient.hacks.spearmace.model.TickInput;
@@ -27,6 +28,7 @@ import net.wurstclient.hacks.spearmace.state.Kit;
 import net.wurstclient.hacks.spearmace.state.Pending.PearlInFlight;
 import net.wurstclient.hacks.spearmace.state.Pending.Teleport;
 import net.wurstclient.hacks.spearmace.state.SelfState;
+import net.wurstclient.hacks.spearmace.state.Vitals.Apple;
 import net.wurstclient.util.Rotation;
 
 /**
@@ -52,9 +54,12 @@ import net.wurstclient.util.Rotation;
  * @param minChance
  *            catches less likely than this are refused, {@link #MIN_CHANCE}
  *            unless data collection wants unlikely catches thrown too
+ * @param eat
+ *            whether to eat a golden apple while waiting for the catch,
+ *            which goes on after the teleport
  */
-public record PearlCatch(Rotation pearlAim, int delay, double minChance)
-	implements Action
+public record PearlCatch(Rotation pearlAim, int delay, double minChance,
+	boolean eat) implements Action
 {
 	/** Catches less likely than this are refused. */
 	public static final double MIN_CHANCE = 0.5;
@@ -96,9 +101,20 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 			delay = Math.max(1, delay);
 	}
 	
+	public PearlCatch(Rotation pearlAim, int delay, double minChance)
+	{
+		this(pearlAim, delay, minChance, false);
+	}
+	
 	public PearlCatch(Rotation pearlAim, int delay)
 	{
 		this(pearlAim, delay, MIN_CHANCE);
+	}
+	
+	/** The same catch, eating a golden apple while it waits. */
+	public PearlCatch eating()
+	{
+		return new PearlCatch(pearlAim, delay, minChance, true);
 	}
 	
 	/**
@@ -133,8 +149,9 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 	@Override
 	public String name()
 	{
-		return String.format("PearlCatch(yaw=%.1f, pitch=%.1f, delay=%s)",
-			pearlAim.yaw(), pearlAim.pitch(), delay == AUTO ? "auto" : delay);
+		return String.format("PearlCatch(yaw=%.1f, pitch=%.1f, delay=%s%s)",
+			pearlAim.yaw(), pearlAim.pitch(), delay == AUTO ? "auto" : delay,
+			eat ? ", eat" : "");
 	}
 	
 	@Override
@@ -177,7 +194,7 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 		
 		Flying flying = new Flying(name(), d, now, kit.windCharge(),
 			kit.selected(), plan, nominal, expected.pSuccess(), -1,
-			Set.copyOf(oldPearls), null, now, self, -1);
+			Set.copyOf(oldPearls), null, now, self, -1, eat);
 		TickInput click = TickInput.NONE.withRotation(pearlAim)
 			.withSlot(kit.enderPearl()).withUse();
 		return Step.run(click, flying).asCommitted();
@@ -297,11 +314,14 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 	 *            in the state
 	 * @param cushionTick
 	 *            when a {@link Cushion} throw was clicked, or -1
+	 * @param eat
+	 *            whether to start eating once the charge is thrown
 	 */
 	private record Flying(String name, int delay, int clickTick, int chargeSlot,
 		int prevSlot, Plan plan, PearlInfo info, double chance, int chargeTick,
 		Set<Integer> oldPearls, PearlInFlight pearl, int pearlTick,
-		SelfState last, int cushionTick) implements Action, InFlight
+		SelfState last, int cushionTick, boolean eat)
+		implements Action, InFlight
 	{
 		@Override
 		public Step next(Level level, GameState s)
@@ -345,6 +365,8 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 			TickInput input = TickInput.NONE;
 			int chargeTick = this.chargeTick;
 			int cushionTick = this.cushionTick;
+			boolean eat = this.eat;
+			boolean startEating = false;
 			if(throwNow)
 			{
 				input = TickInput.NONE.withRotation(plan.aim())
@@ -355,6 +377,12 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 			{
 				input = Cushion.throwInput(self, self.kit().windCharge());
 				cushionTick = tick;
+			}else if(eat && chargeTick >= 0 && tick > chargeTick
+				&& canEat(level, self))
+			{
+				// selecting the apple replaces restoring the slot
+				startEating = true;
+				eat = false;
 			}else if(chargeTick >= 0 && tick == chargeTick + 1
 				&& prevSlot != chargeSlot
 				|| cushionTick >= 0 && tick == cushionTick + 1)
@@ -364,9 +392,32 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance)
 				new Flying(name, delay, clickTick, chargeSlot, prevSlot, plan,
 					info, plan == this.plan ? chance : plan.pSuccess(),
 					chargeTick, oldPearls, seen != null ? seen : pearl,
-					seen != null ? tick : pearlTick, self, cushionTick);
+					seen != null ? tick : pearlTick, self, cushionTick, eat);
 			// nothing else can be done until the pearl lands or is caught
-			return Step.run(input, then).asCommitted();
+			Run run = Step.run(input, then).asCommitted();
+			if(startEating)
+				return run.eating(self, self.kit().goldenApple());
+			if(self.eating() && input.slot() < 0)
+				return Eat.keepEating(self, then).asCommitted();
+			return run;
+		}
+		
+		/**
+		 * Whether eating can start now: an apple is worth it, and if the
+		 * pearl misses, the landing won't need a {@link Cushion} throw
+		 * before the apple is eaten, as a throw while eating needs an extra
+		 * tick to switch items.
+		 */
+		private static boolean canEat(Level level, SelfState self)
+		{
+			if(!Eat.worthEating(self)
+				|| !self.pending(Teleport.class).isEmpty())
+				return false;
+			
+			SelfState miss = self.withoutPearls();
+			Cushion.Landing landing = Cushion.landing(level, miss);
+			return landing == null || landing.fallDamage() <= 0
+				|| landing.ticks() > Apple.EAT_TICKS + 2;
 		}
 		
 		@Override

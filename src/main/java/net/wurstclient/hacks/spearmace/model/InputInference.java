@@ -36,7 +36,8 @@ public enum InputInference
 		ItemStack held = after.kit().held();
 		boolean use = (held.is(Items.WIND_CHARGE) || held.is(Items.ENDER_PEARL))
 			&& before.kit().cooldown(held) == 0
-			&& after.kit().cooldown(held) > 0;
+			&& after.kit().cooldown(held) > 0
+			|| after.eating() && !before.eating();
 		
 		// an attack resets the charge at the end of the step, a held item
 		// change only in the next one
@@ -48,7 +49,7 @@ public enum InputInference
 		// the later view
 		SelfState view = attack ? after : before;
 		return new TickInput(new Rotation(view.yaw(), view.pitch()),
-			before.move(), before.sprinting(), before.jump(), slot, attack,
-			use);
+			before.move(), before.sprinting(), before.jump(), slot, attack, use,
+			after.eating());
 	}
 }

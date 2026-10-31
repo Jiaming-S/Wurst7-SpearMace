@@ -60,6 +60,12 @@ public final class GymArena
 			"hotbar.4 with mace[enchantments={\"minecraft:wind_burst\":3}]",
 			"hotbar.5 with netherite_sword", "hotbar.6 with netherite_axe"};
 	
+	private static final String[] ARMOR =
+		{"head with diamond_helmet", "chest with diamond_chestplate",
+			"legs with diamond_leggings", "feet with diamond_boots"};
+	private static final String PROTECTION =
+		"[enchantments={\"minecraft:protection\":4}]";
+	
 	private BlockPos from;
 	private BlockPos to;
 	private final ArrayList<Vec3> spawns = new ArrayList<>();
@@ -86,12 +92,14 @@ public final class GymArena
 	
 	/**
 	 * The box, or a 128x128 one around {@code center} if none is set, as
-	 * pearl catches easily carry the bots 20 blocks past each other.
+	 * pearl catches easily carry the bots 20 blocks past each other. It
+	 * reaches far down, so that the floor is in it even if whoever started
+	 * the gym was flying.
 	 */
 	public AABB box(Vec3 center)
 	{
 		if(from == null)
-			return new AABB(center.x - 64, center.y - 16, center.z - 64,
+			return new AABB(center.x - 64, center.y - 64, center.z - 64,
 				center.x + 64, center.y + 128, center.z + 64);
 		return new AABB(from.getX(), from.getY(), from.getZ(), to.getX() + 1,
 			to.getY() + 1, to.getZ() + 1);
@@ -122,18 +130,33 @@ public final class GymArena
 		kit = null;
 	}
 	
-	/** Replaces {@code player}'s inventory with the kit. */
-	public void giveKit(MinecraftServer server, ServerPlayer player)
+	/**
+	 * Replaces {@code player}'s inventory with the kit. The default kit
+	 * gets {@code apples} golden apples, and {@code armor} adds diamond
+	 * armor with Protection IV to either kit.
+	 */
+	public void giveKit(MinecraftServer server, ServerPlayer player, int apples,
+		boolean armor)
 	{
 		Inventory inv = player.getInventory();
 		inv.clearContent();
+		String uuid = player.getStringUUID();
 		if(kit != null)
 			for(int i = 0; i < kit.size() && i < inv.getContainerSize(); i++)
 				inv.setItem(i, kit.get(i).copy());
 		else
+		{
 			for(String item : DEFAULT_KIT)
-				GymReferee.command(server, "item replace entity "
-					+ player.getStringUUID() + " " + item);
+				GymReferee.command(server,
+					"item replace entity " + uuid + " " + item);
+			if(apples > 0)
+				GymReferee.command(server, "item replace entity " + uuid
+					+ " hotbar.7 with golden_apple " + apples);
+		}
+		if(armor)
+			for(String piece : ARMOR)
+				GymReferee.command(server, "item replace entity " + uuid
+					+ " armor." + piece + PROTECTION);
 		inv.setSelectedSlot(0);
 	}
 	

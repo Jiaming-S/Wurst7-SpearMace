@@ -22,11 +22,27 @@ import net.wurstclient.hacks.spearmace.state.SelfState;
  * for being below the target), a wind charge to launch again with, and
  * being close enough to strike. A pending pearl teleport counts as already
  * being there.
+ *
+ * <p>
+ * The player's own health counts too, as {@link SelfState#expectedHealth()}
+ * : each point missing from full health plus a golden apple's
+ * absorption costs, and more for each point below {@link #LOW_HEALTH}. Low
+ * health close to the
+ * target costs extra, as nothing models the target hitting back.
  */
 public final class DamageRace implements Evaluator
 {
 	/** Horizontal distance that a strike from above still covers. */
 	private static final double STRIKE_RANGE = 3;
+	
+	/** Below this much effective health, each point is worth more. */
+	public static final double LOW_HEALTH = 10;
+	
+	/** Effective health above full health that still counts. */
+	private static final double EXTRA_HEALTH = 4;
+	
+	/** Closer than this to the target, low health is in danger. */
+	public static final double THREAT_RANGE = 6;
 	
 	private final Weights w;
 	
@@ -46,7 +62,8 @@ public final class DamageRace implements Evaluator
 		double taken = o.damageTaken() + (1 - o.chance()) * o.missDamage();
 		return o.chance() * o.damageDealt() - w.fallDamage() * taken
 			- w.windCharge() * o.count(Event.THREW_WIND_CHARGE)
-			- w.pearl() * o.count(Event.THREW_PEARL) - w.tick() * o.ticks();
+			- w.pearl() * o.count(Event.THREW_PEARL)
+			- w.apple() * o.count(Event.ATE) - w.tick() * o.ticks();
 	}
 	
 	@Override
@@ -67,6 +84,22 @@ public final class DamageRace implements Evaluator
 		if(self.kit().windCharge() >= 0)
 			value += w.ready();
 		double gap = pos.subtract(s.target().pos()).horizontalDistance();
-		return value - w.distance() * Math.max(0, gap - STRIKE_RANGE);
+		value -= w.distance() * Math.max(0, gap - STRIKE_RANGE);
+		return value + health(s, pos);
+	}
+	
+	private double health(GameState s, Vec3 pos)
+	{
+		SelfState self = s.self();
+		double health = self.expectedHealth();
+		double cap = self.vitals().maxHealth() + EXTRA_HEALTH;
+		double low = Math.max(0, LOW_HEALTH - health);
+		double missing = Math.max(0, cap - health);
+		double value = -w.health() * (missing + low * low / LOW_HEALTH);
+		
+		double near = THREAT_RANGE - pos.distanceTo(s.target().eyePos());
+		if(near > 0)
+			value -= w.threat() * low / LOW_HEALTH * near / THREAT_RANGE;
+		return value;
 	}
 }

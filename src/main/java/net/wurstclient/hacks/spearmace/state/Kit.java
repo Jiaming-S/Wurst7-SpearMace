@@ -33,6 +33,7 @@ import net.wurstclient.WurstClient;
 import net.wurstclient.hacks.spearmace.combat.Loadout;
 import net.wurstclient.hacks.spearmace.combat.Loadout.PreItem;
 import net.wurstclient.hacks.spearmace.maneuver.Hotbar;
+import net.wurstclient.hacks.spearmace.state.Vitals.Apple;
 
 /**
  * The hotbar and everything about it that the models read: the items, the
@@ -88,6 +89,20 @@ public final class Kit
 		HashMap<Identifier, Integer> newCooldowns = new HashMap<>(cooldowns);
 		newCooldowns.put(cooldownGroup(get(slot)), cooldown);
 		return new Kit(newSlots, selected, newCooldowns, baseAttackSpeed,
+			baseAttackDamage);
+	}
+	
+	/**
+	 * The same kit after the server consumed one item from {@code slot},
+	 * without a cooldown.
+	 */
+	public Kit withConsumed(int slot)
+	{
+		ArrayList<ItemStack> newSlots = new ArrayList<>(slots);
+		ItemStack used = get(slot).copy();
+		used.shrink(1);
+		newSlots.set(slot, used);
+		return new Kit(newSlots, selected, cooldowns, baseAttackSpeed,
 			baseAttackDamage);
 	}
 	
@@ -205,6 +220,32 @@ public final class Kit
 	public boolean hasWindCharge()
 	{
 		return slots.stream().anyMatch(s -> s.is(Items.WIND_CHARGE));
+	}
+	
+	/**
+	 * @return a hotbar slot holding golden apples that are ready, plain ones
+	 *         before enchanted ones, or -1
+	 */
+	public int goldenApple()
+	{
+		int plain = readySlot(s -> s.is(Items.GOLDEN_APPLE));
+		return plain >= 0 ? plain
+			: readySlot(s -> s.is(Items.ENCHANTED_GOLDEN_APPLE));
+	}
+	
+	public static boolean isGoldenApple(ItemStack stack)
+	{
+		return apple(stack) != null;
+	}
+	
+	/** What eating {@code stack} does, or {@code null} if it isn't one. */
+	public static Apple apple(ItemStack stack)
+	{
+		if(stack.is(Items.GOLDEN_APPLE))
+			return Apple.GOLDEN;
+		if(stack.is(Items.ENCHANTED_GOLDEN_APPLE))
+			return Apple.ENCHANTED;
+		return null;
 	}
 	
 	/** @return a hotbar slot holding ender pearls that are ready, or -1 */

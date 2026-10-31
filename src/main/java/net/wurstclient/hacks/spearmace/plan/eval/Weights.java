@@ -27,10 +27,19 @@ package net.wurstclient.hacks.spearmace.plan.eval;
  *            for a wind charge being ready, to launch again
  * @param distance
  *            per block of horizontal distance beyond strike range
+ * @param health
+ *            per point of the player's own effective health (health,
+ *            absorption and the Regeneration still to come), more when it
+ *            is low
+ * @param apple
+ *            per golden apple eaten
+ * @param threat
+ *            for having low health close to the target, which can hit back
  */
 public record Weights(double fallDamage, double windCharge, double pearl,
-	double tick, double height, double maxHeight, double ready, double distance)
+	double tick, double height, double maxHeight, double ready, double distance,
+	double health, double apple, double threat)
 {
 	public static final Weights DEFAULT =
-		new Weights(2, 1, 3, 0.05, 1, 30, 2, 1);
+		new Weights(2, 1, 3, 0.05, 1, 30, 2, 1, 1, 2, 4);
 }

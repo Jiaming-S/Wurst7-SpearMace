@@ -59,7 +59,7 @@ public sealed interface Step
 		{
 			TickInput moved = new TickInput(input.rotation(),
 				forward ? Move.FORWARD : Move.NONE, forward, input.jump(),
-				input.slot(), input.attack(), input.use());
+				input.slot(), input.attack(), input.use(), input.useHeld());
 			return new Run(moved, claims, committed, then)
 				.holding(Channel.MOVE);
 		}
@@ -69,6 +69,24 @@ public sealed interface Step
 		{
 			return new Run(input.withRotation(rotation), claims, committed,
 				then).holding(Channel.AIM);
+		}
+		
+		/**
+		 * Also clicks {@code slot}, if it isn't selected yet, and clicks and
+		 * holds the use key, which starts eating what the slot holds.
+		 */
+		public Run eating(SelfState self, int slot)
+		{
+			Run run = new Run(input.withUse().withUseHeld(true), claims,
+				committed, then).holding(Channel.USE);
+			return slot == self.kit().selected() ? run : run.withSlot(slot);
+		}
+		
+		/** Also keeps holding the use key, or lets go of it. */
+		public Run holdingUse(boolean held)
+		{
+			return new Run(input.withUseHeld(held), claims, committed, then)
+				.holding(Channel.USE);
 		}
 		
 		public Run withThen(Action next)
@@ -83,17 +101,19 @@ public sealed interface Step
 		
 		/**
 		 * The whole input for this update: the claimed channels from this
-		 * step, the held keys from {@code self} otherwise.
+		 * step, the held keys from {@code self} otherwise. The use key is
+		 * only held while eating.
 		 */
 		public TickInput merged(SelfState self)
 		{
 			boolean move = claims.contains(Channel.MOVE);
 			boolean jump = claims.contains(Channel.JUMP);
+			boolean use = claims.contains(Channel.USE);
 			return new TickInput(input.rotation(),
 				move ? input.move() : self.move(),
 				move ? input.sprint() : self.sprinting(),
 				jump ? input.jump() : self.jump(), input.slot(), input.attack(),
-				input.use());
+				input.use(), use ? input.useHeld() : self.eating());
 		}
 	}
 	

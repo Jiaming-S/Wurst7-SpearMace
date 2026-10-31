@@ -53,13 +53,15 @@ import net.wurstclient.hacks.spearmace.state.Pending.WindChargeInFlight;
  *            {@code Player.entityInteractionRange()}
  * @param knockbackResistance
  *            the {@code EXPLOSION_KNOCKBACK_RESISTANCE} attribute
+ * @param useTicks
+ *            ticks left of eating, 0 if not eating
  */
 public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 	double fallDistance, double impactY, int impulseGrace, float yaw,
 	float pitch, Move move, boolean sprinting, boolean jump, boolean fallFlying,
 	int attackStrengthTicker, boolean heldChanged, int missTime,
-	double interactionRange, double knockbackResistance, Kit kit,
-	List<Pending> pending)
+	double interactionRange, double knockbackResistance, Vitals vitals,
+	int useTicks, Kit kit, List<Pending> pending)
 {
 	private static final Minecraft MC = WurstClient.MC;
 	
@@ -79,9 +81,19 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 			!ItemStack.isSameItem(MC.player.lastItemInMainHand,
 				MC.player.getMainHandItem()),
 			MC.missTime, MC.player.entityInteractionRange(),
-			MC.player
-				.getAttributeValue(Attributes.EXPLOSION_KNOCKBACK_RESISTANCE),
-			Kit.capture(), ownProjectiles());
+			MC.player.getAttributeValue(
+				Attributes.EXPLOSION_KNOCKBACK_RESISTANCE),
+			Vitals.capture(), capturedUseTicks(), Kit.capture(),
+			ownProjectiles());
+	}
+	
+	/** Only eating counts, other items aren't modelled. */
+	private static int capturedUseTicks()
+	{
+		if(!MC.player.isUsingItem()
+			|| !Kit.isGoldenApple(MC.player.getUseItem()))
+			return 0;
+		return MC.player.getUseItemRemainingTicks();
 	}
 	
 	private static List<Pending> ownProjectiles()
@@ -153,7 +165,39 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 		return new SelfState(tick, pos, vel, onGround, fallDistance, impactY,
 			impulseGrace, yaw, pitch, move, sprinting, jump, fallFlying,
 			attackStrengthTicker, heldChanged, missTime, interactionRange,
-			knockbackResistance, kit, rest);
+			knockbackResistance, vitals, useTicks, kit, rest);
+	}
+	
+	/**
+	 * {@link Vitals#effective()} once what is on its way arrives: damage and
+	 * apples the server already has, and the apple being eaten, in
+	 * proportion to how far along it is.
+	 */
+	public double expectedHealth()
+	{
+		Vitals v = vitals;
+		for(Pending p : pending)
+			switch(p)
+			{
+				case Pending.SelfDamage d -> v = v.hurt(d.damage());
+				case Pending.Ate a -> v = v.ate(a.apple());
+				default ->
+					{
+					}
+			}
+		
+		double expected = v.effective();
+		Vitals.Apple apple = Kit.apple(kit.held());
+		if(eating() && apple != null)
+			expected += apple.value(v) * (Vitals.Apple.EAT_TICKS - useTicks)
+				/ Vitals.Apple.EAT_TICKS;
+		return expected;
+	}
+	
+	/** Whether the player is eating. */
+	public boolean eating()
+	{
+		return useTicks > 0;
 	}
 	
 	public <T extends Pending> List<T> pending(Class<T> type)

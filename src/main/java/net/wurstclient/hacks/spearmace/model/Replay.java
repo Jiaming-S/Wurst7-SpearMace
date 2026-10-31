@@ -46,20 +46,24 @@ public enum Replay
 	 *            depends on server timing that the client can't know, or
 	 *            by a pearl teleporting somewhere else because of random
 	 *            projectile spread
+	 * @param health
+	 *            predicted minus real health plus absorption
+	 * @param useTicks
+	 *            predicted minus real ticks left of eating
 	 */
 	public record StepError(int index, double pos, double vel, boolean slot,
 		int ticker, double fall, int windChargeCooldown, int pearlCooldown,
-		double targetPos, double targetHealth, boolean timing,
-		EnumSet<Event> events, TickInput input)
+		double targetPos, double targetHealth, double health, int useTicks,
+		boolean timing, EnumSet<Event> events, TickInput input)
 	{
 		@Override
 		public String toString()
 		{
 			return String.format(
-				"#%d pos=%.4f vel=%.4f slot=%s ticker=%d fall=%.3f cd=%d/%d target=%.3f/%.2f%s %s %s",
+				"#%d pos=%.4f vel=%.4f slot=%s ticker=%d fall=%.3f cd=%d/%d target=%.3f/%.2f health=%.2f use=%d%s %s %s",
 				index, pos, vel, slot ? "ok" : "WRONG", ticker, fall,
 				windChargeCooldown, pearlCooldown, targetPos, targetHealth,
-				timing ? " (timing)" : "", events, input);
+				health, useTicks, timing ? " (timing)" : "", events, input);
 		}
 	}
 	
@@ -100,20 +104,22 @@ public enum Replay
 				.filter(s -> s.pos() > pos || s.vel() > vel || !s.slot()
 					|| Math.abs(s.ticker()) > ticks
 					|| Math.abs(s.windChargeCooldown()) > ticks
-					|| Math.abs(s.pearlCooldown()) > ticks)
+					|| Math.abs(s.pearlCooldown()) > ticks
+					|| Math.abs(s.health()) > 0.01 || s.useTicks() != 0)
 				.toList();
 		}
 		
 		public String summary()
 		{
 			return String.format(
-				"%d steps (%d off by server timing): pos max=%.4f mean=%.5f, vel max=%.4f mean=%.5f, slot errors=%d, ticker max=%.0f, fall max=%.3f, cooldown max=%.0f/%.0f, target pos max=%.3f health max=%.2f",
+				"%d steps (%d off by server timing): pos max=%.4f mean=%.5f, vel max=%.4f mean=%.5f, slot errors=%d, ticker max=%.0f, fall max=%.3f, cooldown max=%.0f/%.0f, target pos max=%.3f health max=%.2f, own health max=%.2f, eating max=%.0f",
 				steps.size(), timingSteps(), max(StepError::pos),
 				mean(StepError::pos), max(StepError::vel), mean(StepError::vel),
 				slotErrors(), max(StepError::ticker), max(StepError::fall),
 				max(StepError::windChargeCooldown),
 				max(StepError::pearlCooldown), max(StepError::targetPos),
-				max(StepError::targetHealth));
+				max(StepError::targetHealth), max(StepError::health),
+				max(StepError::useTicks));
 		}
 	}
 	
@@ -194,7 +200,13 @@ public enum Replay
 			p.attackStrengthTicker() - a.attackStrengthTicker(),
 			// the client doesn't reset it on smashes, see Observer
 			Math.max(0, p.fallDistance() - a.fallDistance()), windCharge, pearl,
-			targetPos, targetHealth, timing, t.events(), input);
+			targetPos, targetHealth, health(p) - health(a),
+			p.useTicks() - a.useTicks(), timing, t.events(), input);
+	}
+	
+	private static double health(SelfState s)
+	{
+		return s.vitals().health() + s.vitals().absorption();
 	}
 	
 	/** A velocity change that one side has and the other doesn't. */

@@ -13,6 +13,14 @@ public enum Event
 	THREW_WIND_CHARGE,
 	THREW_PEARL,
 	
+	STARTED_EATING,
+	
+	/** The player finished eating a golden apple. */
+	ATE,
+	
+	/** Eating stopped before it was done. */
+	STOPPED_EATING,
+	
 	/** An attack click that hit nothing, starting the miss cooldown. */
 	MISSED,
 	

@@ -47,6 +47,9 @@ public final class PlayerSim
 	public boolean sprinting;
 	public boolean jump;
 	
+	/** Whether an item is in use, which slows the movement keys. */
+	public boolean usingItem;
+	
 	public PlayerSim(Level level, Vec3 pos, Vec3 vel, boolean onGround)
 	{
 		this.level = level;
@@ -64,6 +67,7 @@ public final class PlayerSim
 		sim.move = Move.ofHeldKeys();
 		sim.sprinting = MC.player.isSprinting();
 		sim.jump = MC.options.keyJump.isDown();
+		sim.usingItem = MC.player.isUsingItem();
 		return sim;
 	}
 	
@@ -76,6 +80,7 @@ public final class PlayerSim
 		sim.move = state.move();
 		sim.sprinting = state.sprinting();
 		sim.jump = state.jump();
+		sim.usingItem = state.eating();
 		return sim;
 	}
 	
@@ -93,6 +98,7 @@ public final class PlayerSim
 		sim.move = after.move();
 		sim.sprinting = after.sprinting();
 		sim.jump = after.jump();
+		sim.usingItem = before.eating() && after.eating();
 		sim.step();
 		return after.vel().subtract(sim.vel);
 	}
@@ -104,6 +110,7 @@ public final class PlayerSim
 		sim.move = move;
 		sim.sprinting = sprinting;
 		sim.jump = jump;
+		sim.usingItem = usingItem;
 		return sim;
 	}
 	
@@ -136,7 +143,7 @@ public final class PlayerSim
 				/ (blockFriction * blockFriction * blockFriction));
 		else
 			speed = sprinting ? 0.025999999F : 0.02F;
-		vel = vel.add(move.acceleration(speed, yaw));
+		vel = vel.add(move.acceleration(speed, yaw, usingItem));
 		
 		Vec3 move = Entity.collideBoundingBox(MC.player, vel, box(pos), level,
 			List.of());

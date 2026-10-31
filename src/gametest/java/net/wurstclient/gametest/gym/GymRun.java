@@ -51,11 +51,15 @@ public final class GymRun
 	 * @param tickRate
 	 *            the server's tick rate during the run; the acting bots'
 	 *            budgets grow as it drops
+	 * @param apples
+	 *            golden apples in the default kit
+	 * @param armor
+	 *            whether the bots wear diamond armor with Protection IV
 	 */
 	public record Settings(int episodes, long endMillis, int maxTicks,
 		double health, String specA, String specB, boolean mirror, long seed,
 		Path outDir, GymConfig expert, double explore, float tickRate,
-		int pairs)
+		int pairs, int apples, boolean armor)
 	{}
 	
 	private final MinecraftServer server;
