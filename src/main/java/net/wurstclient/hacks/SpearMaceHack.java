@@ -130,8 +130,8 @@ public final class SpearMaceHack extends Hack implements UpdateListener
 	
 	private final SliderSetting threatPenalty =
 		new SliderSetting("Threat penalty",
-			"How much SpearMace avoids staying close to the target with low"
-				+ " health.",
+			"How much SpearMace avoids staying close to a player target,"
+				+ " which can hit back. Low health makes it avoid it more.",
 			Weights.DEFAULT.threat(), 0, 20, 0.5, ValueDisplay.DECIMAL);
 	
 	private final EntityFilterList entityFilters =

@@ -62,6 +62,9 @@ public final class GymReferee
 	private static final int SETTLE_TICKS = 25;
 	private static final int MAX_OUTSIDE_TICKS = 40;
 	
+	/** A hit taken this soon after landing one is traded back. */
+	private static final int TRADE_TICKS = 60;
+	
 	private enum Phase
 	{
 		WAITING,
@@ -104,6 +107,14 @@ public final class GymReferee
 		double fall;
 		int hits;
 		int blocked;
+		
+		/**
+		 * Hits on this side that came within {@link #TRADE_TICKS} of its own.
+		 */
+		int traded;
+		
+		/** When this side last hit the other, or -1. */
+		int lastHitTick = -1;
 		int windCharges;
 		int pearls;
 		int apples;
@@ -384,6 +395,7 @@ public final class GymReferee
 			side.addProperty("taken", s.taken);
 			side.addProperty("fall", s.fall);
 			side.addProperty("hits", s.hits);
+			side.addProperty("traded", s.traded);
 			side.addProperty("blocked", s.blocked);
 			if(p != null)
 			{
@@ -463,6 +475,10 @@ public final class GymReferee
 			attacker.dealt += damageTaken;
 			attacker.dealtRaw += baseDamage;
 			attacker.hits++;
+			attacker.lastHitTick = phaseTicks;
+			if(stats[i].lastHitTick >= 0
+				&& phaseTicks - stats[i].lastHitTick <= TRADE_TICKS)
+				stats[i].traded++;
 			if(blocked)
 				attacker.blocked++;
 		}

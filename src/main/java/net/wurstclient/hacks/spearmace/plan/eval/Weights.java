@@ -34,7 +34,7 @@ package net.wurstclient.hacks.spearmace.plan.eval;
  * @param apple
  *            per golden apple eaten
  * @param threat
- *            for having low health close to the target, which can hit back
+ *            for staying close to a player target, which can hit back
  */
 public record Weights(double fallDamage, double windCharge, double pearl,
 	double tick, double height, double maxHeight, double ready, double distance,

@@ -44,7 +44,8 @@ import net.wurstclient.util.Rotation;
  * pearl catch straight up; a lunge toward it, or a launch for height,
  * running forward or straight up</li>
  * <li>in the air: drift toward the target</li>
- * <li>rising: wait for the apex</li>
+ * <li>rising: wait for the apex, or lunge away from a near player, so that
+ * it can't hit back after a smash</li>
  * <li>on the ground near the target: a pearl catch straight up, or a
  * launch with a wind charge</li>
  * <li>falling near the target: {@link StrikeSelector}'s pick, then the
@@ -137,6 +138,10 @@ public final class Options
 			Hold hold = new Hold("rising", HOLD_RISING);
 			Drift drift = new Drift(HOLD_RISING);
 			actions.addAll(far ? List.of(drift, hold) : List.of(hold, drift));
+			// right after a smash launch, so that a player doesn't hit back
+			// when this comes down next to it again
+			addIfNew(actions, new EscapeLunge(), !far && s.target().player()
+				&& self.kit().lungeSpear() >= 0 && self.kit().hand() >= 0);
 			addIfNew(actions, new Eat(), eat);
 		}else if(self.onGround())
 		{

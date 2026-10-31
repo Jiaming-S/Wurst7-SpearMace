@@ -11,6 +11,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -31,11 +32,13 @@ import net.minecraft.world.phys.Vec3;
  * @param shieldDisabled
  *            ticks until a knocked down shield works again; the client
  *            can't see this, so captures start at 0
+ * @param player
+ *            whether it is a player, which can hit back
  */
 public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 	boolean moves, double width, double height, double eyeHeight, float health,
 	float absorption, int armor, boolean shieldRaised, float headYaw,
-	int hurtTime, int shieldDisabled)
+	int hurtTime, int shieldDisabled, boolean player)
 {
 	/** {@code LivingEntity.hurtTime} after a hit. */
 	public static final int HURT_TIME = 10;
@@ -50,7 +53,7 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 			target.getBbWidth(), target.getBbHeight(), target.getEyeHeight(),
 			target.getHealth(), target.getAbsorptionAmount(),
 			target.getArmorValue(), shieldRaised(target), target.getYHeadRot(),
-			target.hurtTime, 0);
+			target.hurtTime, 0, target instanceof Player);
 	}
 	
 	/** Whether {@code target} is holding up a shield or something like it. */
@@ -87,7 +90,7 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 	{
 		return new TargetState(entityId, newPos, vel, onGround, moves, width,
 			height, eyeHeight, health, absorption, armor, shieldRaised, headYaw,
-			hurtTime, shieldDisabled);
+			hurtTime, shieldDisabled, player);
 	}
 	
 	/** The same target after moving, with its timers ticked. */
@@ -95,8 +98,8 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 	{
 		return new TargetState(entityId, newPos, newVel, newOnGround, moves,
 			width, height, eyeHeight, health, absorption, armor, shieldRaised,
-			headYaw, Math.max(0, hurtTime - 1),
-			Math.max(0, shieldDisabled - 1));
+			headYaw, Math.max(0, hurtTime - 1), Math.max(0, shieldDisabled - 1),
+			player);
 	}
 	
 	/** The same target right after a hit, before its health changes. */
@@ -104,7 +107,7 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 	{
 		return new TargetState(entityId, pos, vel, onGround, moves, width,
 			height, eyeHeight, health, absorption, armor, shieldRaised, headYaw,
-			HURT_TIME, shieldDisabled);
+			HURT_TIME, shieldDisabled, player);
 	}
 	
 	/** The same target after losing {@code damage}, ignoring armor. */
@@ -114,7 +117,7 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 		return new TargetState(entityId, pos, vel, onGround, moves, width,
 			height, eyeHeight, (float)(health - (damage - fromAbsorption)),
 			(float)(absorption - fromAbsorption), armor, shieldRaised, headYaw,
-			hurtTime, shieldDisabled);
+			hurtTime, shieldDisabled, player);
 	}
 	
 	/** The same target with its shield knocked down for {@code ticks}. */
@@ -122,7 +125,7 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 	{
 		return new TargetState(entityId, pos, vel, onGround, moves, width,
 			height, eyeHeight, health, absorption, armor, shieldRaised, headYaw,
-			hurtTime, ticks);
+			hurtTime, ticks, player);
 	}
 	
 	/**
@@ -136,7 +139,8 @@ public record TargetState(int entityId, Vec3 pos, Vec3 vel, boolean onGround,
 		
 		return new TargetState(entityId, pos, vel, onGround, moves, width,
 			height, eyeHeight, health, absorption, armor, shieldRaised, headYaw,
-			Math.max(hurtTime, predicted.hurtTime), predicted.shieldDisabled);
+			Math.max(hurtTime, predicted.hurtTime), predicted.shieldDisabled,
+			player);
 	}
 	
 	public AABB box()

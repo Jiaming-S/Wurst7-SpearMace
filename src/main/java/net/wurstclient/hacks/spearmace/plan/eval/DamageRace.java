@@ -26,9 +26,9 @@ import net.wurstclient.hacks.spearmace.state.SelfState;
  * <p>
  * The player's own health counts too, as {@link SelfState#expectedHealth()}
  * : each point missing from full health plus a golden apple's
- * absorption costs, and more for each point below {@link #LOW_HEALTH}. Low
- * health close to the
- * target costs extra, as nothing models the target hitting back.
+ * absorption costs, and more for each point below {@link #LOW_HEALTH}.
+ * Staying close to a player target costs extra, more with low health, as
+ * nothing models it hitting back.
  */
 public final class DamageRace implements Evaluator
 {
@@ -41,8 +41,11 @@ public final class DamageRace implements Evaluator
 	/** Effective health above full health that still counts. */
 	private static final double EXTRA_HEALTH = 4;
 	
-	/** Closer than this to the target, low health is in danger. */
+	/** Closer than this to a player target, it can hit back. */
 	public static final double THREAT_RANGE = 6;
+	
+	/** Feet this far above a target's eyes are out of its reach. */
+	private static final double SAFE_ABOVE = 3;
 	
 	private final Weights w;
 	
@@ -97,9 +100,11 @@ public final class DamageRace implements Evaluator
 		double missing = Math.max(0, cap - health);
 		double value = -w.health() * (missing + low * low / LOW_HEALTH);
 		
-		double near = THREAT_RANGE - pos.distanceTo(s.target().eyePos());
-		if(near > 0)
-			value -= w.threat() * low / LOW_HEALTH * near / THREAT_RANGE;
+		// a player close by can hit back, unless it is well below us
+		Vec3 eye = s.target().eyePos();
+		double near = THREAT_RANGE - pos.distanceTo(eye);
+		if(s.target().player() && near > 0 && pos.y < eye.y + SAFE_ABOVE)
+			value -= w.threat() * near / THREAT_RANGE * (1 + low / LOW_HEALTH);
 		return value;
 	}
 }
