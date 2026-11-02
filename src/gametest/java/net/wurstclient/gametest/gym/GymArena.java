@@ -50,18 +50,27 @@ public final class GymArena
 	private static final double MIN_START_DISTANCE = 6;
 	private static final double MAX_START_DISTANCE = 40;
 	
+	/** How far the middle of two sampled starts may be from the center. */
+	private static final double CENTER_SPREAD = 8;
+	
 	/** Half the width of the default arena. */
 	public static final int RADIUS = 256;
 	
 	/** The most blocks {@code /clone} copies at once. */
 	private static final int CLONE_LIMIT = 32768;
 	
-	/** Hotbar slots, as in {@code SpearMaceTest}. */
-	private static final String[] DEFAULT_KIT =
-		{"hotbar.1 with netherite_spear[enchantments={\"minecraft:lunge\":3}]",
-			"hotbar.2 with wind_charge 64", "hotbar.3 with ender_pearl 16",
-			"hotbar.4 with mace[enchantments={\"minecraft:wind_burst\":3}]",
-			"hotbar.5 with netherite_sword", "hotbar.6 with netherite_axe"};
+	/**
+	 * The hotbar of {@code SpearMaceTest}, plus a shield (not used yet) and
+	 * 48 more ender pearls in the inventory, 64 in all. SpearMace only uses
+	 * the hotbar, so those wait until something moves them there.
+	 */
+	private static final String[] DEFAULT_KIT = {
+		"hotbar.1 with netherite_spear[enchantments={\"minecraft:lunge\":3}]",
+		"hotbar.2 with wind_charge 64", "hotbar.3 with ender_pearl 16",
+		"hotbar.4 with mace[enchantments={\"minecraft:wind_burst\":3}]",
+		"hotbar.5 with netherite_sword", "hotbar.6 with netherite_axe",
+		"hotbar.8 with shield", "inventory.0 with ender_pearl 16",
+		"inventory.1 with ender_pearl 16", "inventory.2 with ender_pearl 16"};
 	
 	private static final String[] ARMOR =
 		{"head with diamond_helmet", "chest with diamond_chestplate",
@@ -169,7 +178,8 @@ public final class GymArena
 	
 	/**
 	 * Two start points: random distinct spawns if there are two or more,
-	 * otherwise two floor spots in the box, a random distance apart.
+	 * otherwise two floor spots in the box, a random distance apart around
+	 * its center.
 	 *
 	 * @param box
 	 *            the arena, already moved by {@code offset}
@@ -202,10 +212,14 @@ public final class GymArena
 				|| box.getZsize() < 2 * Math.abs(dz))
 				continue;
 			
-			double cx = box.minX + Math.abs(dx)
-				+ random.nextDouble() * (box.getXsize() - 2 * Math.abs(dx));
-			double cz = box.minZ + Math.abs(dz)
-				+ random.nextDouble() * (box.getZsize() - 2 * Math.abs(dz));
+			double cx = Math.clamp(
+				box.getCenter().x
+					+ (random.nextDouble() * 2 - 1) * CENTER_SPREAD,
+				box.minX + Math.abs(dx), box.maxX - Math.abs(dx));
+			double cz = Math.clamp(
+				box.getCenter().z
+					+ (random.nextDouble() * 2 - 1) * CENTER_SPREAD,
+				box.minZ + Math.abs(dz), box.maxZ - Math.abs(dz));
 			
 			Vec3 a = floor(level, box, cx - dx, cz - dz);
 			Vec3 b = floor(level, box, cx + dx, cz + dz);
