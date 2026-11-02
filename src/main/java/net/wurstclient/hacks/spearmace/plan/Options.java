@@ -39,10 +39,9 @@ import net.wurstclient.util.Rotation;
  * <ul>
  * <li>below the target: a pearl catch straight up, to get above it
  * again</li>
- * <li>far from the target: on the ground, diagonal pearl catches toward
- * it (only when very far, they miss more often than straight up) and a
- * pearl catch straight up; a lunge toward it, or a launch for height,
- * running forward or straight up</li>
+ * <li>far from the target: instant diagonal pearl catches toward it, on the
+ * ground also a pearl catch straight up; a lunge toward it, or a launch for
+ * height, running forward or straight up</li>
  * <li>in the air: drift toward the target</li>
  * <li>rising: wait for the apex, or lunge away from a near player, so that
  * it can't hit back after a smash</li>
@@ -77,17 +76,12 @@ public final class Options
 	private static final double RISING = 0.1;
 	
 	/**
-	 * Further than this horizontally, diagonal pearl catches are worth
-	 * their misses; they cover about 17 (steep) to 22 (diagonal) blocks.
-	 * Closer, a catch straight up and then lunges get there more reliably.
-	 */
-	private static final double DIAGONAL_RANGE = 20;
-	
-	/**
-	 * Diagonal for distance, steep for height. Only thrown from the
-	 * ground, where they miss the least.
+	 * Diagonal for distance, steep for height. Always instant (see
+	 * {@link PearlCatch#INSTANT}).
 	 */
 	private static final float[] CATCH_PITCHES = {-30, -45};
+	
+	/** For catches straight up, where a later catch gains height. */
 	private static final int CATCH_DELAY = 3;
 	
 	/**
@@ -177,20 +171,18 @@ public final class Options
 	
 	/**
 	 * Ways to get closer: pearl catches toward the target or straight up
-	 * (from the ground only), a flat lunge toward it, and a launch for
-	 * height that later moves can use.
+	 * (that one from the ground only), a flat lunge toward it, and a launch
+	 * for height that later moves can use.
 	 */
 	private static void addApproach(GameState s, List<Action> actions,
-		boolean pearls)
+		boolean vertical)
 	{
 		Kit kit = s.self().kit();
 		float yaw = towardYaw(s);
-		if(pearls && horizontalDistance(s) > DIAGONAL_RANGE)
-			for(float pitch : CATCH_PITCHES)
-				addIfNew(actions,
-					new PearlCatch(new Rotation(yaw, pitch), CATCH_DELAY),
-					canCatch(kit));
-		if(pearls)
+		for(float pitch : CATCH_PITCHES)
+			addIfNew(actions, PearlCatch.instant(new Rotation(yaw, pitch)),
+				canCatch(kit));
+		if(vertical)
 			addVerticalCatch(s, actions);
 		if(kit.lungeSpear() >= 0 && kit.hand() >= 0)
 			actions.add(new SpearLunge(yaw, 0));

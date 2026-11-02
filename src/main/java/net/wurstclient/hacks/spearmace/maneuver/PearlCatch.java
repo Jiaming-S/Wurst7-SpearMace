@@ -39,7 +39,10 @@ import net.wurstclient.util.Rotation;
  * The pearl's rotation picks the direction (straight up for height,
  * diagonal for distance). {@code delay}, the ticks between the two clicks,
  * picks how far along the pearl's path the catch happens: a quick wind
- * charge catches it early, a late one further along. Before the pearl is
+ * charge catches it early, a late one further along. Diagonal catches are
+ * always instant ({@link #INSTANT}), as later ones miss too often; only
+ * catches straight up ({@link #isVertical}) take other delays. Before the pearl
+ * is
  * visible, the charge is aimed at its average flight path. Once the real
  * pearl shows up, the aim is redone with its actual velocity, which removes
  * the pearl's own random spread. The aim is redone once more right before
@@ -50,7 +53,8 @@ import net.wurstclient.util.Rotation;
  *
  * @param delay
  *            updates between the pearl click and the wind charge click, at
- *            least 1, or {@link #AUTO}
+ *            least 1, or {@link #AUTO}; always {@link #INSTANT} unless
+ *            {@code pearlAim} is vertical
  * @param minChance
  *            catches less likely than this are refused, {@link #MIN_CHANCE}
  *            unless data collection wants unlikely catches thrown too
@@ -74,8 +78,19 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance,
 	 */
 	public static final int SEEN_DELAY = 3;
 	
+	/**
+	 * An Instant Pearl Catch (IPC): the wind charge goes on the update right
+	 * after the pearl. The server sometimes handles both clicks in the same
+	 * tick, which the planner treats as a coin flip
+	 * ({@link PearlCatchPlanner#BATCH_CHANCE}).
+	 */
+	public static final int INSTANT = 1;
+	
 	/** Picks the most reliable delay when the catch starts. */
 	public static final int AUTO = 0;
+	
+	/** Pearl pitches up to this count as straight up. */
+	private static final float VERTICAL_PITCH = -89;
 	private static final int MAX_AUTO_DELAY = 10;
 	
 	/** Teleports this far from the plan are counted as misses. */
@@ -97,8 +112,25 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance,
 	
 	public PearlCatch
 	{
-		if(delay != AUTO)
+		if(!isVertical(pearlAim))
+			delay = INSTANT;
+		else if(delay != AUTO)
 			delay = Math.max(1, delay);
+	}
+	
+	/**
+	 * Whether {@code pearlAim} throws straight up, the only catch that
+	 * takes delays other than {@link #INSTANT}.
+	 */
+	public static boolean isVertical(Rotation pearlAim)
+	{
+		return pearlAim.pitch() <= VERTICAL_PITCH;
+	}
+	
+	/** {@code maxDelay}, or {@link #INSTANT} for a diagonal catch. */
+	private static int maxDelay(Rotation pearlAim, int maxDelay)
+	{
+		return isVertical(pearlAim) ? maxDelay : Math.min(maxDelay, INSTANT);
 	}
 	
 	public PearlCatch(Rotation pearlAim, int delay, double minChance)
@@ -138,6 +170,12 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance,
 		public int chargeTick();
 		
 		public SelfState last();
+	}
+	
+	/** An Instant Pearl Catch, see {@link #INSTANT}. */
+	public static PearlCatch instant(Rotation pearlAim)
+	{
+		return new PearlCatch(pearlAim, INSTANT);
 	}
 	
 	/** Picks the most reliable delay (see {@link #bestDelay}). */
@@ -230,7 +268,7 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance,
 		List<PlayerSim> track = newTrack(level, self, pearlAim.yaw());
 		PearlInfo nominal = nominalPearl(pearlAim, track, 0);
 		ArrayList<Option> options = new ArrayList<>();
-		for(int delay = 1; delay <= maxDelay; delay++)
+		for(int delay = 1; delay <= maxDelay(pearlAim, maxDelay); delay++)
 		{
 			Plan plan = planFromHere(level, delay, track, nominal, 0);
 			if(plan != null)
@@ -258,7 +296,7 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance,
 		List<PlayerSim> track = newTrack(level, self, pearlAim.yaw());
 		PearlInfo nominal = nominalPearl(pearlAim, track, 0);
 		return newPlanner(level, false).maxFeasibleDelay(nominal, 0, track,
-			minChance, MAX_DELAY, MAX_CATCH_MOVE);
+			minChance, maxDelay(pearlAim, MAX_DELAY), MAX_CATCH_MOVE);
 	}
 	
 	/**
@@ -431,10 +469,11 @@ public record PearlCatch(Rotation pearlAim, int delay, double minChance,
 			if(chargeTick < 0)
 				return Step
 					.fail("teleported before the wind charge was thrown");
-			
-			// a pearl that misses the charge teleports wherever it lands
-			if(pearlLanded(level)
-				|| to.distanceTo(plan.destination()) > MISS_DISTANCE)
+				
+			// a pearl that misses the charge teleports wherever it lands;
+			// an instant catch may hit its charge anywhere along the way
+			if(pearlLanded(level) || delay != INSTANT
+				&& to.distanceTo(plan.destination()) > MISS_DISTANCE)
 				return Step.fail(
 					"the pearl missed and landed at " + Prediction.fmt(to));
 			

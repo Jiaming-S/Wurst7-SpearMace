@@ -31,7 +31,8 @@ import net.minecraft.server.MinecraftServer.MultiplayerScope;
  * instead of the SpearMaceTest kit
  * <li>{@code /gym start [episodes] [act=<cfg>] [a=<cfg>] [b=<cfg>]
  * [expert=<cfg>] [explore=P] [tps=N] [pairs=N] [mirror] [self] [noagents]
- * [seed=N] [hours=H] [ticks=N] [health=N]}: starts a bot client per player
+ * [seed=N] [hours=H] [ticks=N] [health=N] [apples=N] [armor] [totem]}:
+ * starts a bot client per player
  * (Gym-A and Gym-B, or Gym-0A, Gym-0B, ... with {@code pairs}; with
  * {@code self}, you are the first A). Configs are {@code rules},
  * {@code beam:WxD}, {@code mcts:N}, {@code random} (default) or

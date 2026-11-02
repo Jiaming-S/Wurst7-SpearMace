@@ -55,7 +55,9 @@ public final class PearlCatchPlanner
 	 * Chance that the server handles clicks from two consecutive client
 	 * ticks in the same server tick. Gametests saw anything from 1 in 5 to 4
 	 * in 5 throws, depending on how the client and server ticks line up, so
-	 * a delay of 1 is treated as a coin flip.
+	 * a delay of 1 is treated as a coin flip. Both projectiles then fly
+	 * side by side, so an aim that catches either way is picked, and a
+	 * catch on any move counts (see {@link #plan}).
 	 */
 	public static final double BATCH_CHANCE = 0.5;
 	
@@ -177,12 +179,12 @@ public final class PearlCatchPlanner
 		int i = (int)(throwTick - now);
 		if(i < 0 || i + 1 >= track.size())
 			return null;
-		
-		// a delay of 1 usually lands in the same server tick as the pearl
+			
+		// a delay of 1 may land in the same server tick as the pearl; the
+		// plan's destination is the one for separate ticks, as in TickSim
 		int delay = (int)(throwTick - (pearl.spawnTick() - 1 - lag));
 		boolean batched = delay == 1;
-		int m0 =
-			moveAtSpawn(throwTick, lag, pearl.spawnTick()) - (batched ? 1 : 0);
+		int m0 = moveAtSpawn(throwTick, lag, pearl.spawnTick());
 		PlayerSim before = track.get(i);
 		PlayerSim after = track.get(i + 1);
 		Vec3 spawn = WindChargeSim.spawnPos(after.pos);
@@ -194,17 +196,19 @@ public final class PearlCatchPlanner
 		List<Vec3> nominal = nominalPath(pearl.sample(null), maxMove);
 		int firstAge = pearl.state().age;
 		ArrayList<Plan> candidates = new ArrayList<>();
-		for(int j = Math.max(m0, firstAge) + 1; j <= maxMove; j++)
-		{
-			Vec3 mid = nominal.get(j - 1 - firstAge)
-				.add(nominal.get(j - firstAge)).scale(0.5);
-			Rotation aim = aimAt(mid, spawn, knownMovement, onGround, j - m0);
-			Outcome outcome = simulate(pearl.sample(null), m0, spawn,
-				velocity(aim, Vec3.ZERO, knownMovement, onGround), maxMove);
-			if(outcome.caught())
-				candidates.add(new Plan(throwTick, aim, outcome.move(),
-					outcome.destination(), 0));
-		}
+		for(int start : batched ? new int[]{m0 - 1, m0} : new int[]{m0})
+			for(int j = Math.max(start, firstAge) + 1; j <= maxMove; j++)
+			{
+				Vec3 mid = nominal.get(j - 1 - firstAge)
+					.add(nominal.get(j - firstAge)).scale(0.5);
+				Rotation aim =
+					aimAt(mid, spawn, knownMovement, onGround, j - start);
+				Outcome outcome = simulate(pearl.sample(null), m0, spawn,
+					velocity(aim, Vec3.ZERO, knownMovement, onGround), maxMove);
+				if(outcome.caught())
+					candidates.add(new Plan(throwTick, aim, outcome.move(),
+						outcome.destination(), 0));
+			}
 		
 		if(candidates.isEmpty())
 			return null;
@@ -284,15 +288,16 @@ public final class PearlCatchPlanner
 			double r = random.nextDouble();
 			int shift;
 			if(batched)
-				shift = r < BATCH_CHANCE ? 0 : 1;
+				shift = r < BATCH_CHANCE ? -1 : 0;
 			else
 				shift = r < LAG_JITTER ? -1 : r < 2 * LAG_JITTER ? 1 : 0;
 			Vec3 vel = velocity(plan.aim(), Shots.sampleNoise(random),
 				knownMovement, onGround);
 			Outcome outcome =
 				simulate(pearl.sample(random), m0 + shift, spawn, vel, maxMove);
-			if(outcome.caught() && Math
-				.abs(outcome.move() - plan.catchMove()) <= CATCH_TOLERANCE)
+			// side by side, the spread decides where, not whether
+			if(outcome.caught() && (batched || Math
+				.abs(outcome.move() - plan.catchMove()) <= CATCH_TOLERANCE))
 				hits++;
 		}
 		

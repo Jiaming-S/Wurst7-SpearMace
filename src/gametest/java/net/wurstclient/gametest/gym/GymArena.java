@@ -51,7 +51,7 @@ public final class GymArena
 	private static final double MAX_START_DISTANCE = 40;
 	
 	/** Half the width of the default arena. */
-	public static final int RADIUS = 128;
+	public static final int RADIUS = 256;
 	
 	/** The most blocks {@code /clone} copies at once. */
 	private static final int CLONE_LIMIT = 32768;
@@ -135,11 +135,12 @@ public final class GymArena
 	
 	/**
 	 * Replaces {@code player}'s inventory with the kit. The default kit
-	 * gets {@code apples} golden apples, and {@code armor} adds diamond
-	 * armor with Protection IV to either kit.
+	 * gets {@code apples} golden apples, {@code armor} adds diamond armor
+	 * with Protection IV to either kit and {@code totem} a totem of undying
+	 * in the offhand.
 	 */
 	public void giveKit(MinecraftServer server, ServerPlayer player, int apples,
-		boolean armor)
+		boolean armor, boolean totem)
 	{
 		Inventory inv = player.getInventory();
 		inv.clearContent();
@@ -160,6 +161,9 @@ public final class GymArena
 			for(String piece : ARMOR)
 				GymReferee.command(server, "item replace entity " + uuid
 					+ " armor." + piece + PROTECTION);
+		if(totem)
+			GymReferee.command(server, "item replace entity " + uuid
+				+ " weapon.offhand with totem_of_undying");
 		inv.setSelectedSlot(0);
 	}
 	

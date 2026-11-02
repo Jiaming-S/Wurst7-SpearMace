@@ -118,6 +118,7 @@ public final class GymReferee
 		int windCharges;
 		int pearls;
 		int apples;
+		int totems;
 	}
 	
 	/**
@@ -237,8 +238,8 @@ public final class GymReferee
 	private void reset(ServerPlayer player, Vec3 start, Vec3 facing)
 	{
 		player.setGameMode(GameType.SURVIVAL);
-		run.arena().giveKit(server, player, settings.apples(),
-			settings.armor());
+		run.arena().giveKit(server, player, settings.apples(), settings.armor(),
+			settings.totem());
 		String uuid = player.getStringUUID();
 		command(server, "attribute " + uuid + " minecraft:max_health base set "
 			+ settings.health());
@@ -283,6 +284,7 @@ public final class GymReferee
 			stats[i].windCharges = count(p, Items.WIND_CHARGE);
 			stats[i].pearls = count(p, Items.ENDER_PEARL);
 			stats[i].apples = count(p, Items.GOLDEN_APPLE);
+			stats[i].totems = count(p, Items.TOTEM_OF_UNDYING);
 			ServerPlayNetworking.send(p,
 				new Start(episode, fileSide(i), players[1 - i],
 					configs[i].toJson(), expert == null ? "" : expert.toJson(),
@@ -405,6 +407,8 @@ public final class GymReferee
 					s.pearls - count(p, Items.ENDER_PEARL));
 				side.addProperty("applesEaten",
 					s.apples - count(p, Items.GOLDEN_APPLE));
+				side.addProperty("totemsPopped",
+					s.totems - count(p, Items.TOTEM_OF_UNDYING));
 				side.addProperty("endHealth", p.getHealth());
 				side.add("end", GymJson.vec(p.position()));
 			}
@@ -446,6 +450,11 @@ public final class GymReferee
 	{
 		int i = sideOf(entity);
 		if(i < 0 || phase == Phase.WAITING)
+			return true;
+		
+		// vanilla checks for a totem only after this
+		if(entity.getMainHandItem().is(Items.TOTEM_OF_UNDYING)
+			|| entity.getOffhandItem().is(Items.TOTEM_OF_UNDYING))
 			return true;
 			
 		// the next reset heals the bot anyway, this just avoids the

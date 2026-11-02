@@ -119,7 +119,9 @@ import net.wurstclient.util.Rotation;
  * collects pearl catch training data instead, see
  * {@link CatchDataCollector}; {@code all} leaves it out. {@code cushion}
  * checks fall damage against the model and {@link Cushion}, {@code heal}
- * eating golden apples and the health the model expects.
+ * eating golden apples and the health the model expects, {@code ipc}
+ * instant diagonal pearl catches, {@code boost} a wind charge thrown down
+ * around a vertical catch's teleport.
  *
  * Every tick of every scenario is logged with the predicted and actual
  * state, so the logs double as calibration data for the forward models.
@@ -185,7 +187,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 	private ShieldDummy shieldDummy;
 	
 	private static final List<String> OPT_IN_GROUPS =
-		List.of("hard", "keys", "catchdata", "cushion", "heal");
+		List.of("hard", "keys", "catchdata", "cushion", "heal", "ipc", "boost");
 	
 	public static boolean isEnabled()
 	{
@@ -282,6 +284,12 @@ public final class SpearMaceTest implements FabricClientGameTest
 			
 			if(runs("heal"))
 				runHealTests(context, server, failures);
+			
+			if(runs("ipc"))
+				testInstantCatches(context, server, failures);
+			
+			if(runs("boost"))
+				testBoostedVerticalCatch(context, server);
 			
 			if("catchdata".equals(System.getenv("WURST_SPEARMACE_TEST")))
 				new CatchDataCollector(context, server,
@@ -607,6 +615,141 @@ public final class SpearMaceTest implements FabricClientGameTest
 		return successes == 0 ? Double.NaN : gained / successes;
 	}
 	
+	/**
+	 * Instant diagonal catches from the ground: catch rate, the planner's
+	 * chance, and how far the player gets before landing again.
+	 */
+	private void testInstantCatches(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		int trials = 10;
+		for(Rotation aim : List.of(DIAGONAL, STEEP_DIAGONAL))
+		{
+			String name = String.format("IPC pitch=%.0f", aim.pitch());
+			int caught = 0;
+			double chance = 0;
+			double travelled = 0;
+			for(int i = 0; i < trials; i++)
+			{
+				String trial = name + " #" + (i + 1);
+				reset(context, server);
+				Vec3 start = playerPos(context);
+				List<Result> results = run(context, trial, 120,
+					r -> r.enqueue(PearlCatch.instant(aim)));
+				Result r = results.isEmpty() ? null : results.get(0);
+				if(r != null && r.prediction() != null)
+					chance += r.prediction().pSuccess();
+				Caught c = r == null ? null : r.payload(Caught.class);
+				Vec3 predicted = r == null || r.prediction() == null ? null
+					: r.prediction().endPos();
+				double error = c == null || predicted == null ? Double.NaN
+					: c.teleportedTo().distanceTo(predicted);
+				context.waitFor(mc -> mc.player.onGround(), 200);
+				double distance = horizontalDist(playerPos(context), start);
+				LOGGER.info("SM: {} {} error={} landed {} blocks away", trial,
+					r, fmt(error), fmt(distance));
+				if(!accurate(c, error, 1.5))
+					continue;
+				caught++;
+				travelled += distance;
+			}
+			
+			LOGGER.info("SM: {} caught {}/{} mean p={} mean travel={}", name,
+				caught, trials, fmt(chance / trials),
+				fmt(caught == 0 ? Double.NaN : travelled / caught));
+			if(caught < trials * 8 / 10)
+				failures.add(name + ": only " + caught + "/" + trials
+					+ " accurate catches");
+		}
+	}
+	
+	/**
+	 * Measures a wind charge thrown straight down around the teleport of a
+	 * vertical catch: finds the teleport tick without the throw, then
+	 * throws at each tick around it and logs the height reached.
+	 * {@code WURST_BOOST_DELAY} sets the catch's delay (default 3).
+	 */
+	private void testBoostedVerticalCatch(ClientGameTestContext context,
+		TestServerContext server)
+	{
+		String env = System.getenv("WURST_BOOST_DELAY");
+		int delay = env == null ? 3 : Integer.parseInt(env);
+		ArrayList<String> summary = new ArrayList<>();
+		int teleport = -1;
+		for(int i = 0; i < 2; i++)
+		{
+			BoostTrial t = boostTrial(context, server,
+				"Boost baseline #" + (i + 1), delay, -1);
+			summary.add(String.format("baseline teleport=t%d apex=%s",
+				t.teleportTick(), fmt(t.apex())));
+			teleport = Math.max(teleport, t.teleportTick());
+		}
+		
+		for(int offset = -6; offset <= 2; offset++)
+			for(int i = 0; i < 2; i++)
+			{
+				BoostTrial t =
+					boostTrial(
+						context, server, "Boost T" + (offset < 0 ? "" : "+")
+							+ offset + " #" + (i + 1),
+						delay, teleport + offset);
+				summary.add(String.format(
+					"throw at T%+d (t%d) teleport=t%d apex=%s", offset,
+					teleport + offset, t.teleportTick(), fmt(t.apex())));
+			}
+		
+		summary
+			.forEach(line -> LOGGER.info("SM: boost delay={} {}", delay, line));
+	}
+	
+	/** When the teleport showed up on the client, and the highest feet y. */
+	private record BoostTrial(int teleportTick, double apex)
+	{}
+	
+	private BoostTrial boostTrial(ClientGameTestContext context,
+		TestServerContext server, String name, int delay, int throwAt)
+	{
+		reset(context, server);
+		int[] tick = {0};
+		int[] teleport = {-1};
+		double[] apex = {Double.NEGATIVE_INFINITY};
+		double[] lastY = {playerPos(context).y};
+		Consumer<Minecraft> perTick = mc -> {
+			tick[0]++;
+			double y = mc.player.getY();
+			if(teleport[0] < 0 && y - lastY[0] > 2)
+				teleport[0] = tick[0];
+			lastY[0] = y;
+			if(teleport[0] >= 0)
+				apex[0] = Math.max(apex[0], y);
+			if(tick[0] == throwAt)
+			{
+				KeyInput.look(new Rotation(mc.player.getYRot(), 90));
+				KeyInput.selectSlot(2);
+				KeyInput.clickUse();
+			}
+		};
+		
+		run(context, name, 120,
+			r -> r.enqueueAnyway(new PearlCatch(UP, delay, 0)), perTick);
+		for(int i = 0; i < 100; i++)
+		{
+			context.waitTick();
+			logServerProjectiles(name, 1000 + i);
+			boolean landed = context.computeOnClient(mc -> {
+				perTick.accept(mc);
+				LOGGER.info("SM [{} t{}] pos={} vel={} ground={}", name,
+					tick[0], fmt(mc.player.position()),
+					fmt(mc.player.getDeltaMovement()), mc.player.onGround());
+				return teleport[0] >= 0 && mc.player.onGround();
+			});
+			if(landed)
+				break;
+		}
+		
+		return new BoostTrial(teleport[0], apex[0]);
+	}
+	
 	private void testDiagonalCatchAfterWindCharge(ClientGameTestContext context,
 		TestServerContext server, List<String> failures)
 	{
@@ -634,7 +777,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 				fmt(c.startPos()), fmt(pearlCatch.teleportedTo()),
 				fmt(c.prediction().endPos()), fmt(error));
 			// within about one pearl move
-			if(error <= 1.5)
+			if(accurate(pearlCatch, error, 1.5))
 				successes++;
 		}
 		
@@ -708,7 +851,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 				fmt(c.startPos()), fmt(pearlCatch.teleportedTo()),
 				fmt(c.prediction().endPos()), fmt(error));
 			// after the lunge, one pearl move is about 2.6 blocks
-			if(error <= 3)
+			if(accurate(pearlCatch, error, 3))
 				successes++;
 		}
 		
@@ -773,7 +916,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		}
 		
 		List<Result> refused = run(context, name + " while flying", 20,
-			r -> r.enqueue(new PearlCatch(DIAGONAL, 3)));
+			r -> r.enqueue(PearlCatch.instant(DIAGONAL)));
 		Result r = refused.isEmpty() ? null : refused.get(0);
 		LOGGER.info("SM: {} while flying {}", name, r);
 		if(r == null || r.status() != Status.FAILED
@@ -785,13 +928,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 		context.waitTicks(10);
 		
 		List<Result> results = run(context, name + " after landing", 150,
-			c -> c.enqueue(new PearlCatch(DIAGONAL, 3)));
+			c -> c.enqueue(PearlCatch.instant(DIAGONAL)));
 		Result c = results.isEmpty() ? null : results.getLast();
 		Caught caught = c == null ? null : c.payload(Caught.class);
 		double error = caught == null ? Double.NaN
 			: caught.teleportedTo().distanceTo(c.prediction().endPos());
 		LOGGER.info("SM: {} after landing {} error={}", name, c, fmt(error));
-		if(caught == null || error > 1.5)
+		if(!accurate(caught, error, 1.5))
 			failures.add(name + ": no accurate catch after landing: " + c);
 	}
 	
@@ -816,13 +959,13 @@ public final class SpearMaceTest implements FabricClientGameTest
 			runCommand(server, "summon ender_pearl -1.5 -58.48 0.5 " + motion);
 			
 			List<Result> results = run(context, name, 150,
-				r -> r.enqueue(new PearlCatch(DIAGONAL, 3)));
+				r -> r.enqueue(PearlCatch.instant(DIAGONAL)));
 			Result c = results.isEmpty() ? null : results.getLast();
 			Caught caught = c == null ? null : c.payload(Caught.class);
 			double error = caught == null ? Double.NaN
 				: caught.teleportedTo().distanceTo(c.prediction().endPos());
 			LOGGER.info("SM: {} {} error={}", name, c, fmt(error));
-			if(caught != null && error <= 1.5)
+			if(accurate(caught, error, 1.5))
 				successes++;
 		}
 		
@@ -937,7 +1080,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 			fmt(c == null || c.prediction() == null ? null
 				: c.prediction().endPos()),
 			fmt(error));
-		return caught != null && error <= 1.5;
+		return accurate(caught, error, 1.5);
 	}
 	
 	/** Holds W, A, S, D and sprint ("R") as listed in {@code keys}. */
@@ -2386,6 +2529,18 @@ public final class SpearMaceTest implements FabricClientGameTest
 				p.fallDistance, sb);
 		});
 		LOGGER.info("SM server [{} t{}] {}", name, tick, projectiles);
+	}
+	
+	/**
+	 * Whether {@code caught} teleported within {@code tolerance} of the
+	 * prediction. Instant catches count wherever they caught, as the server
+	 * may handle both clicks in one tick (see {@link PearlCatch#INSTANT}).
+	 */
+	private static boolean accurate(Caught caught, double error,
+		double tolerance)
+	{
+		return caught != null
+			&& (caught.delay() == PearlCatch.INSTANT || error <= tolerance);
 	}
 	
 	private static Result single(List<Result> results, String name,

@@ -20,6 +20,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.DisplaySlot;
@@ -55,11 +56,13 @@ public final class GymRun
 	 *            golden apples in the default kit
 	 * @param armor
 	 *            whether the bots wear diamond armor with Protection IV
+	 * @param totem
+	 *            whether the bots hold a totem of undying in the offhand
 	 */
 	public record Settings(int episodes, long endMillis, int maxTicks,
 		double health, String specA, String specB, boolean mirror, long seed,
 		Path outDir, GymConfig expert, double explore, float tickRate,
-		int pairs, int apples, boolean armor)
+		int pairs, int apples, boolean armor, boolean totem)
 	{}
 	
 	private final MinecraftServer server;
@@ -70,6 +73,12 @@ public final class GymRun
 	private final AgentProcess agents;
 	private final HashMap<UUID, GameType> spectators = new HashMap<>();
 	private final float oldTickRate;
+	
+	/**
+	 * The world border's center x/z and size before the run, or
+	 * {@code null} if the run doesn't move it.
+	 */
+	private final double[] oldBorder;
 	private boolean running = true;
 	
 	/**
@@ -103,6 +112,26 @@ public final class GymRun
 		
 		oldTickRate = server.tickRateManager().tickrate();
 		GymReferee.command(server, "tick rate " + settings.tickRate());
+		
+		// with one pair, the border keeps the bots in the arena; more pairs
+		// would need one border each
+		if(players.size() == 1)
+		{
+			WorldBorder border = server.overworld().getWorldBorder();
+			oldBorder = new double[]{border.getCenterX(), border.getCenterZ(),
+				border.getSize()};
+			setBorder(box.getCenter().x, box.getCenter().z,
+				Math.max(box.getXsize(), box.getZsize()));
+		}else
+			oldBorder = null;
+	}
+	
+	private void setBorder(double x, double z, double size)
+	{
+		// not /worldborder, which can't parse the default size (6.0E7)
+		WorldBorder border = server.overworld().getWorldBorder();
+		border.setCenter(x, z);
+		border.setSize(size);
 	}
 	
 	/** How far apart the pairs' arenas are. */
@@ -175,6 +204,8 @@ public final class GymRun
 		});
 		spectators.clear();
 		GymReferee.command(server, "tick rate " + oldTickRate);
+		if(oldBorder != null)
+			setBorder(oldBorder[0], oldBorder[1], oldBorder[2]);
 		if(arena.hasBox())
 			for(int i = 0; i < referees.size(); i++)
 				forceload("remove", box.move(new Vec3(i * spacing(box), 0, 0)));

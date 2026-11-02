@@ -43,7 +43,7 @@ public final class GymCommand
 	private static final String USAGE = "/gym start [episodes]"
 		+ " [act=<cfg>] [a=<cfg>] [b=<cfg>] [expert=<cfg>] [explore=P]"
 		+ " [tps=N] [pairs=N] [mirror] [self] [noagents] [seed=N] [hours=H]"
-		+ " [ticks=N] [health=N] [apples=N] [armor]; cfg: rules, beam:WxD,"
+		+ " [ticks=N] [health=N] [apples=N] [armor] [totem]; cfg: rules, beam:WxD,"
 		+ " mcts:N, random," + " expert";
 	
 	/**
@@ -215,7 +215,7 @@ public final class GymCommand
 				Float.parseFloat(opts.getOrDefault("tps", "20")),
 				Integer.parseInt(opts.getOrDefault("pairs", "1")),
 				Integer.parseInt(opts.getOrDefault("apples", "16")),
-				opts.containsKey("armor"));
+				opts.containsKey("armor"), opts.containsKey("totem"));
 			if(settings.pairs() < 1 || settings.tickRate() <= 0)
 				throw new IllegalArgumentException(
 					"pairs and tps must be positive");

@@ -373,9 +373,12 @@ final class CatchDataCollector
 		
 		float pitch = randomPitch(r);
 		
+		// diagonal catches are always instant, see PearlCatch
 		int delay;
 		double d = r.nextDouble();
-		if(d < 0.5)
+		if(!PearlCatch.isVertical(new Rotation(yaw, pitch)))
+			delay = PearlCatch.INSTANT;
+		else if(d < 0.5)
 			delay = 2 + r.nextInt(3);
 		else if(d < 0.92)
 			delay = 1 + r.nextInt(12);
