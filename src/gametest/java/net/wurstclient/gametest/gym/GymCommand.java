@@ -208,7 +208,9 @@ public final class GymCommand
 			settings = new GymRun.Settings(hours > 0 ? 0 : episodes,
 				hours > 0 ? System.currentTimeMillis() + (long)(hours * 3.6e6)
 					: 0,
-				Integer.parseInt(opts.getOrDefault("ticks", "600")),
+				// you might want to fight a bot for as long as you like
+				Integer.parseInt(opts.getOrDefault("ticks",
+					opts.containsKey("self") ? "0" : "2400")),
 				Double.parseDouble(opts.getOrDefault("health", "20")), specA,
 				specB, opts.containsKey("mirror"), seed, outputDir(), expert,
 				Double.parseDouble(opts.getOrDefault("explore", "0")),

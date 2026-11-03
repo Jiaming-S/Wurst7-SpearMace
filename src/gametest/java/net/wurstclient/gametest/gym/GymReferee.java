@@ -335,7 +335,8 @@ public final class GymReferee
 			boolean a = outsideTicks[0] > MAX_OUTSIDE_TICKS;
 			boolean b = outsideTicks[1] > MAX_OUTSIDE_TICKS;
 			endFight("left arena", a && b ? -1 : a ? 1 : 0);
-		}else if(phaseTicks >= settings.maxTicks())
+		}else if(settings.maxTicks() > 0
+			&& phaseTicks >= settings.maxTicks())
 		{
 			float a = player(0).getHealth();
 			float b = player(1).getHealth();

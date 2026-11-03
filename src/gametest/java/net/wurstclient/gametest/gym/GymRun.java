@@ -42,6 +42,8 @@ public final class GymRun
 	private static final int RESTART_CHECK_TICKS = 100;
 	
 	/**
+	 * @param maxTicks
+	 *            how long an episode may last, 0 for no limit
 	 * @param health
 	 *            each bot's max health
 	 * @param expert

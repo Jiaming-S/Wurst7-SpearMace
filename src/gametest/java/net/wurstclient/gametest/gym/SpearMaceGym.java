@@ -34,7 +34,8 @@ import net.minecraft.server.MinecraftServer.MultiplayerScope;
  * [seed=N] [hours=H] [ticks=N] [health=N] [apples=N] [armor] [totem]}:
  * starts a bot client per player
  * (Gym-A and Gym-B, or Gym-0A, Gym-0B, ... with {@code pairs}; with
- * {@code self}, you are the first A). Configs are {@code rules},
+ * {@code self}, you are the first A and episodes have no time limit
+ * unless {@code ticks} sets one; otherwise it is 2400). Configs are {@code rules},
  * {@code beam:WxD}, {@code mcts:N}, {@code random} (default) or
  * {@code expert}. With {@code expert}, every decision is also labeled by
  * that much slower search; {@code tps} slows the game down to give it
