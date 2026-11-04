@@ -1,0 +1,11 @@
+.git
+.gradle
+build
+out
+bin
+run
+logs
+.idea
+.vscode
+spearmace-gym
+spearmace-catchdata

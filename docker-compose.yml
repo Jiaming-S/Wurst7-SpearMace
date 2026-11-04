@@ -1,0 +1,49 @@
+name: spearmace-gym
+
+services:
+  gym:
+    build:
+      context: .
+      dockerfile: docker/gym/Dockerfile
+      args:
+        UID: "1000"
+        GID: "1000"
+    image: spearmace-gym:latest
+    container_name: spearmace-gym
+    restart: "no"
+    init: true
+    stdin_open: true
+    tty: true
+    stop_grace_period: 60s
+    ports:
+      - "25599:25599"
+    environment:
+      WURST_GYM_ACCEPT_EULA: "true"
+
+      # gym
+      WURST_GYM_OPS: ""        # offline names to op, space or comma separated
+      WURST_GYM_AUTOSTART: ""  # /gym start options, e.g. "1000 pairs=2 a=rules b=random"; empty: wait for /gym
+      WURST_GYM_HEADLESS: "1"
+      WURST_GYM_DIR: /gym/output
+
+      MC_SERVER_PORT: "25599"
+      MC_ONLINE_MODE: "false"
+      MC_WHITE_LIST: "false"
+      MC_ENFORCE_SECURE_PROFILE: "false"
+      MC_LEVEL_NAME: spearmace-gym
+      MC_LEVEL_TYPE: "minecraft:flat"
+      MC_GENERATE_STRUCTURES: "false"
+      MC_DIFFICULTY: easy
+      MC_PVP: "true"
+      MC_ALLOW_FLIGHT: "true"
+      MC_SPAWN_PROTECTION: "0"
+      MC_MAX_PLAYERS: "64"
+      MC_VIEW_DISTANCE: "6"
+      MC_SIMULATION_DISTANCE: "6"
+      MC_MOTD: SpearMace Gym (Docker)
+    volumes:
+      - ./spearmace-gym:/gym/output
+      - world:/wurst/build/run/spearMaceGymServer/spearmace-gym
+
+volumes:
+  world:
