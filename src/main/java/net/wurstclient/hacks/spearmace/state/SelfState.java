@@ -72,10 +72,14 @@ public record SelfState(int tick, Vec3 pos, Vec3 vel, boolean onGround,
 	
 	public static SelfState capture()
 	{
+		// the client keeps the old onGround for a tick after a teleport,
+		// such as a pearl catch from the ground into the air
+		boolean onGround = MC.player.onGround()
+			&& PlayerSim.supported(MC.level, MC.player.position());
 		return new SelfState(MC.player.tickCount, MC.player.position(),
-			MC.player.getDeltaMovement(), MC.player.onGround(),
-			MC.player.fallDistance, Double.NaN, 0, MC.player.getYRot(),
-			MC.player.getXRot(), Move.ofHeldKeys(), MC.player.isSprinting(),
+			MC.player.getDeltaMovement(), onGround, MC.player.fallDistance,
+			Double.NaN, 0, MC.player.getYRot(), MC.player.getXRot(),
+			Move.ofHeldKeys(), MC.player.isSprinting(),
 			MC.options.keyJump.isDown(), MC.player.isFallFlying(),
 			MC.player.attackStrengthTicker,
 			!ItemStack.isSameItem(MC.player.lastItemInMainHand,

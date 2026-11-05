@@ -62,7 +62,8 @@ public final class PlayerSim
 	public static PlayerSim ofLocalPlayer()
 	{
 		PlayerSim sim = new PlayerSim(MC.level, MC.player.position(),
-			MC.player.getDeltaMovement(), MC.player.onGround());
+			MC.player.getDeltaMovement(),
+			MC.player.onGround() && supported(MC.level, MC.player.position()));
 		sim.yaw = MC.player.getYRot();
 		sim.move = Move.ofHeldKeys();
 		sim.sprinting = MC.player.isSprinting();
@@ -178,5 +179,19 @@ public final class PlayerSim
 	{
 		return new AABB(feet.x - HALF_WIDTH, feet.y, feet.z - HALF_WIDTH,
 			feet.x + HALF_WIDTH, feet.y + HEIGHT, feet.z + HALF_WIDTH);
+	}
+	
+	/** How far below the feet {@link #supported} looks for a block. */
+	private static final double SUPPORT_DEPTH = 1e-3;
+	
+	/**
+	 * Whether a block is right under a player standing at {@code feet}.
+	 */
+	public static boolean supported(Level level, Vec3 feet)
+	{
+		AABB slab = new AABB(feet.x - HALF_WIDTH, feet.y - SUPPORT_DEPTH,
+			feet.z - HALF_WIDTH, feet.x + HALF_WIDTH, feet.y,
+			feet.z + HALF_WIDTH);
+		return !level.noCollision(slab);
 	}
 }

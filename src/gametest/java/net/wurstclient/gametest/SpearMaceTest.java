@@ -253,6 +253,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 				testWindChargeMoving(context, server, failures);
 				testLungeAngles(context, server, failures);
 				testVerticalPearlCatch(context, server, failures);
+				testStateAfterCatch(context, server, failures);
 				testDiagonalCatchAfterWindCharge(context, server, failures);
 				testLungesWhileFalling(context, server, failures);
 				testChain(context, server, failures);
@@ -857,6 +858,75 @@ public final class SpearMaceTest implements FabricClientGameTest
 		
 		if(successes < 3)
 			failures.add("Chain: only " + successes + "/5 complete chains");
+	}
+	
+	/**
+	 * A catch from the ground teleports the player into the air, and the
+	 * client keeps its old onGround for that tick. The captured state must
+	 * not, or the next action thinks the player has already landed.
+	 */
+	private void testStateAfterCatch(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "State after catch";
+		reset(context, server);
+		
+		Vec3[] prev = {null};
+		ArrayList<String> teleports = new ArrayList<>();
+		boolean[] wrong = {false};
+		run(context, name, 120, r -> r.enqueue(new PearlCatch(UP, 2)), mc -> {
+			Vec3 pos = mc.player.position();
+			if(prev[0] != null && pos.y - prev[0].y > 2)
+			{
+				SelfState self = SelfState.capture();
+				teleports.add(String.format("height=%.2f raw=%s captured=%s",
+					pos.y - GROUND_Y, mc.player.onGround(), self.onGround()));
+				if(self.onGround())
+					wrong[0] = true;
+			}
+			prev[0] = pos;
+		});
+		
+		LOGGER.info("SM: {} teleports {}", name, teleports);
+		if(teleports.isEmpty())
+			failures.add(name + ": no teleport seen");
+		else if(wrong[0])
+			failures.add(name + ": captured onGround in the air " + teleports);
+	}
+	
+	/**
+	 * A mace strike right after a vertical catch next to the target. It used
+	 * to fail on its first tick, as the stale onGround from the teleport
+	 * made it look like the player had already landed.
+	 */
+	private void testStrikeAfterCatch(ClientGameTestContext context,
+		TestServerContext server, List<String> failures)
+	{
+		String name = "Strike after catch";
+		reset(context, server);
+		int golem = spawnGolem(server, TARGET_X, GROUND_Y, TARGET_Z, true);
+		runCommand(server, "tp @p " + TARGET_X + " " + GROUND_Y + " "
+			+ (TARGET_Z - 1.5) + " 0 0");
+		context.waitFor(mc -> clientEntity(golem) != null);
+		context.waitTicks(2);
+		
+		List<Result> results = run(context, name, 200, r -> {
+			r.enqueue(new PearlCatch(UP, 2));
+			r.enqueue(new MaceStrike(PreItem.SPEAR));
+		});
+		LOGGER.info("SM: {} results {}", name, results);
+		
+		if(results.size() < 2 || results.get(0).status() != Status.DONE)
+		{
+			// the catch itself is tested elsewhere
+			LOGGER.warn("SM: {} skipped, the catch didn't finish: {}", name,
+				results);
+			return;
+		}
+		Result strike = results.get(1);
+		if("landed before the hit".equals(strike.reason())
+			&& strike.endTick() == strike.startTick())
+			failures.add(name + ": failed on its first tick: " + strike);
 	}
 	
 	private void testInfeasibleCatch(ClientGameTestContext context,
@@ -1496,6 +1566,7 @@ public final class SpearMaceTest implements FabricClientGameTest
 		testSearchComparison(context, server, failures);
 		testSearchTrace(context, server, failures);
 		testVerticalCatchNearTarget(context, server, failures);
+		testStrikeAfterCatch(context, server, failures);
 		testCirclingTarget(context, server, failures);
 		testTargetAbove(context, server, failures);
 		testHack(context, server, failures);
