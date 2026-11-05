@@ -40,3 +40,10 @@ spearmace-catchdata/
 
 # SpearMace self-play gym data
 spearmace-gym/
+
+# analysis venv and parquet cache
+analysis/.venv/
+analysis/.cache/
+analysis/models/
+analysis/.ipynb_checkpoints/
+__pycache__/
