@@ -19,6 +19,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.AccessibilityOnboardingScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
@@ -48,6 +49,9 @@ public final class GymAutostart
 	/** Lets the world load before the gym starts. */
 	private static final int SETTLE_TICKS = 40;
 	private static final int QUIT_DELAY_TICKS = 100;
+	
+	/** When to say what is in the way of the title screen. */
+	private static final int STUCK_TICKS = 600;
 	
 	private final String options;
 	private final BooleanSupplier gymRunning;
@@ -86,8 +90,24 @@ public final class GymAutostart
 		{
 			case TITLE ->
 			{
-				if(!(mc.gui.screen() instanceof TitleScreen))
+				// a fresh run dir starts on this screen, not the title
+				if(mc.gui.screen() instanceof AccessibilityOnboardingScreen)
+				{
+					LOGGER.info("Skipping the accessibility onboarding");
+					mc.options.onboardAccessibility = false;
+					mc.options.save();
+					mc.gui.setScreen(new TitleScreen());
 					return;
+				}
+				if(!(mc.gui.screen() instanceof TitleScreen))
+				{
+					if(++ticks == STUCK_TICKS)
+						LOGGER.warn("Still waiting for the title screen, on {}",
+							mc.gui.screen() == null ? "no screen"
+								: mc.gui.screen().getClass().getName());
+					return;
+				}
+				ticks = 0;
 				if(mc.getLevelSource().levelExists(WORLD))
 				{
 					LOGGER.info("Opening world {}", WORLD);
