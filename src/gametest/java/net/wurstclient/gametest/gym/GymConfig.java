@@ -18,11 +18,15 @@ import com.google.gson.Gson;
  *
  * @param search
  *            the "Search" setting's name for it: {@code Rules},
- *            {@code Beam search} or {@code MCTS}
+ *            {@code Beam search} or {@code MCTS}, or {@code Policy} for a
+ *            {@link PolicySearch}
+ * @param policy
+ *            the policy file for {@code Policy}, absolute or relative to
+ *            the gym's data folder, otherwise {@code null}
  */
 public record GymConfig(String search, int width, int depth, int iterations,
 	int budget, double fallDamage, double windCharge, double pearl,
-	double height, double distance)
+	double height, double distance, String policy)
 {
 	private static final Gson GSON = new Gson();
 	
@@ -34,18 +38,19 @@ public record GymConfig(String search, int width, int depth, int iterations,
 	
 	/** SpearMace's defaults, with the weights of {@code Weights.DEFAULT}. */
 	public static final GymConfig DEFAULT =
-		new GymConfig("Beam search", 4, 3, 60, BUDGET, 2, 1, 3, 1, 1);
+		new GymConfig("Beam search", 4, 3, 60, BUDGET, 2, 1, 3, 1, 1, null);
 	
 	/**
 	 * A config from {@code spec}: {@code rules}, {@code beam:WxD},
-	 * {@code mcts:N} with default weights, or {@code random} for a sample
-	 * of everything.
+	 * {@code mcts:N} with default weights, {@code policy:FILE} for a
+	 * {@link PolicySearch} with the model in {@code FILE}, or
+	 * {@code random} for a sample of everything but policies.
 	 */
 	public static GymConfig parse(String spec, Random random)
 	{
-		String[] parts = spec.toLowerCase().split(":", 2);
+		String[] parts = spec.split(":", 2);
 		GymConfig d = DEFAULT;
-		return switch(parts[0])
+		return switch(parts[0].toLowerCase())
 		{
 			case "random" -> sample(random);
 			case "rules" -> d.withSearch("Rules", d.width, d.depth,
@@ -65,8 +70,17 @@ public record GymConfig(String search, int width, int depth, int iterations,
 			}
 			case "mcts" -> d.withSearch("MCTS", d.width, d.depth,
 				parts.length > 1 ? Integer.parseInt(parts[1]) : d.iterations);
+			case "policy" ->
+			{
+				if(parts.length < 2 || parts[1].isBlank())
+					throw new IllegalArgumentException(
+						"policy needs a file: policy:FILE");
+				yield new GymConfig("Policy", d.width, d.depth, d.iterations,
+					d.budget, d.fallDamage, d.windCharge, d.pearl, d.height,
+					d.distance, parts[1]);
+			}
 			default -> throw new IllegalArgumentException("Unknown config: "
-				+ spec + " (rules, beam:WxD, mcts:N, random)");
+				+ spec + " (rules, beam:WxD, mcts:N, policy:FILE, random)");
 		};
 	}
 	
@@ -80,7 +94,7 @@ public record GymConfig(String search, int width, int depth, int iterations,
 			1 + random.nextInt(6), 30 + 10 * random.nextInt(28), BUDGET,
 			jitter(d.fallDamage, random), jitter(d.windCharge, random),
 			jitter(d.pearl, random), jitter(d.height, random),
-			jitter(d.distance, random));
+			jitter(d.distance, random), null);
 	}
 	
 	private static double jitter(double value, Random random)
@@ -93,14 +107,14 @@ public record GymConfig(String search, int width, int depth, int iterations,
 		int iterations)
 	{
 		return new GymConfig(search, width, depth, iterations, budget,
-			fallDamage, windCharge, pearl, height, distance);
+			fallDamage, windCharge, pearl, height, distance, null);
 	}
 	
 	/** The same config with another time budget. */
 	public GymConfig withBudget(int newBudget)
 	{
 		return new GymConfig(search, width, depth, iterations, newBudget,
-			fallDamage, windCharge, pearl, height, distance);
+			fallDamage, windCharge, pearl, height, distance, policy);
 	}
 	
 	public String toJson()
@@ -113,6 +127,15 @@ public record GymConfig(String search, int width, int depth, int iterations,
 		return GSON.fromJson(json, GymConfig.class);
 	}
 	
+	/** The policy file's name without folders and {@code .json}. */
+	private String policyName()
+	{
+		String name = policy.replace('\\', '/');
+		name = name.substring(name.lastIndexOf('/') + 1);
+		return name.endsWith(".json") ? name.substring(0, name.length() - 5)
+			: name;
+	}
+	
 	/** Short, for the scoreboard and logs. */
 	public String label()
 	{
@@ -120,6 +143,7 @@ public record GymConfig(String search, int width, int depth, int iterations,
 		{
 			case "Rules" -> "rules";
 			case "Beam search" -> "beam " + width + "x" + depth;
+			case "Policy" -> "policy " + policyName();
 			default -> "mcts " + iterations;
 		};
 	}

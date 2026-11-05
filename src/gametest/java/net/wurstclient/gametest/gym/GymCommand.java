@@ -8,6 +8,7 @@
 package net.wurstclient.gametest.gym;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -44,7 +45,7 @@ public final class GymCommand
 		+ " [act=<cfg>] [a=<cfg>] [b=<cfg>] [expert=<cfg>] [explore=P]"
 		+ " [tps=N] [pairs=N] [mirror] [self] [noagents] [seed=N] [hours=H]"
 		+ " [ticks=N] [health=N] [apples=N] [armor] [totem]; cfg: rules, beam:WxD,"
-		+ " mcts:N, random," + " expert";
+		+ " mcts:N, policy:FILE, random," + " expert";
 	
 	/**
 	 * The expert stops when its search is done, not at a time limit, so
@@ -199,9 +200,11 @@ public final class GymCommand
 					.withBudget(EXPERT_BUDGET)
 				: null;
 			// fail now rather than at the first episode
+			Path outDir = outputDir();
 			for(String spec : new String[]{specA, specB})
 				if(!spec.equalsIgnoreCase("expert"))
-					GymConfig.parse(spec, new Random());
+					checkPolicy(GymConfig.parse(spec, new Random()),
+						outDir.getParent());
 				else if(expert == null)
 					throw new IllegalArgumentException(
 						"act=expert needs expert=<cfg>");
@@ -212,7 +215,7 @@ public final class GymCommand
 				Integer.parseInt(opts.getOrDefault("ticks",
 					opts.containsKey("self") ? "0" : "2400")),
 				Double.parseDouble(opts.getOrDefault("health", "20")), specA,
-				specB, opts.containsKey("mirror"), seed, outputDir(), expert,
+				specB, opts.containsKey("mirror"), seed, outDir, expert,
 				Double.parseDouble(opts.getOrDefault("explore", "0")),
 				Float.parseFloat(opts.getOrDefault("tps", "20")),
 				Integer.parseInt(opts.getOrDefault("pairs", "1")),
@@ -303,6 +306,21 @@ public final class GymCommand
 			+ " spawns, " + (a.hasKit() ? "custom" : "default") + " kit";
 		c.getSource().sendSuccess(() -> Component.literal(message), false);
 		return 1;
+	}
+	
+	/**
+	 * Fails if {@code config} names a policy file that isn't there. The
+	 * bots resolve it the same way, against the gym's data folder.
+	 */
+	private static void checkPolicy(GymConfig config, Path gymDir)
+	{
+		if(config.policy() == null)
+			return;
+		Path file = Path.of(config.policy());
+		if(!file.isAbsolute())
+			file = gymDir.resolve(file);
+		if(!Files.isRegularFile(file))
+			throw new IllegalArgumentException("No policy file at " + file);
 	}
 	
 	/** One folder per run, kept out of the run dir. */

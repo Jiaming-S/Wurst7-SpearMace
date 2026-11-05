@@ -230,10 +230,24 @@ public final class GymAgent implements DecisionListener
 		
 		// the acting plan is the expert's when they are the same config
 		boolean actIsExpert = act.equals(expertConfig);
-		Planner expert = expertConfig == null || actIsExpert ? null
-			: GymPlanners.of(expertConfig);
-		Planner acting = GymPlanners.exploring(GymPlanners.of(act),
-			start.explore(), new Random(start.seed()));
+		Path gymDir = Path.of(start.outDir()).getParent();
+		Planner expert;
+		Planner acting;
+		try
+		{
+			expert = expertConfig == null || actIsExpert ? null
+				: GymPlanners.of(expertConfig, gymDir);
+			acting = GymPlanners.exploring(GymPlanners.of(act, gymDir),
+				start.explore(), new Random(start.seed()));
+		}catch(RuntimeException ex)
+		{
+			// such as a policy file that can't be read
+			LOGGER.error("Can't set up the planners", ex);
+			closeQuietly(out);
+			range.setValue(oldRange);
+			Preview.setTracing(oldTracing);
+			return;
+		}
 		ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
 			Thread t = new Thread(r, "SpearMace gym " + start.side());
 			t.setDaemon(true);
@@ -249,6 +263,17 @@ public final class GymAgent implements DecisionListener
 			start.episode(), start.side(), start.opponent(), act.label(),
 			expertConfig == null ? "none"
 				: actIsExpert ? "same" : expertConfig.label());
+	}
+	
+	private static void closeQuietly(BufferedWriter out)
+	{
+		try
+		{
+			out.close();
+		}catch(IOException e)
+		{
+			LOGGER.error("Can't close gym data", e);
+		}
 	}
 	
 	private static SliderSetting range(SpearMaceHack hack)
@@ -501,7 +526,7 @@ public final class GymAgent implements DecisionListener
 	}
 	
 	/** An outcome without its steps, which would be most of the file. */
-	private static JsonObject outcome(Outcome o)
+	static JsonObject outcome(Outcome o)
 	{
 		JsonObject json = new JsonObject();
 		json.addProperty("action", o.action().name());

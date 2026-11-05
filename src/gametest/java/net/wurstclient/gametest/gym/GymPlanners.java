@@ -10,6 +10,7 @@ package net.wurstclient.gametest.gym;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.nio.file.Path;
 import java.util.Random;
 
 import net.wurstclient.hacks.SpearMaceHack;
@@ -31,6 +32,28 @@ public enum GymPlanners
 	/** What {@link Plan#why()} says for an exploration move. */
 	public static final String EXPLORE = "explore";
 	
+	/**
+	 * @param gymDir
+	 *            the gym's data folder, which relative policy files are
+	 *            in
+	 */
+	public static Planner of(GymConfig c, Path gymDir)
+	{
+		Planner planner = of(c);
+		if(!"Policy".equals(c.search()))
+			return planner;
+		
+		Path file = Path.of(c.policy());
+		if(!file.isAbsolute() && gymDir != null)
+			file = gymDir.resolve(file);
+		return planner.withSearch(new PolicySearch(PolicyModel.load(file)));
+	}
+	
+	/**
+	 * Without a policy file. A {@code Policy} config gets the default
+	 * search's planner, whose options, controller and evaluator a
+	 * {@link PolicySearch} uses too.
+	 */
 	public static Planner of(GymConfig c)
 	{
 		SearchKind kind = switch(c.search())
